@@ -130,7 +130,7 @@
     // -------------------------------------------------- After Effects
     function FolderItem(name, items) { this.name = name; this.items = items; this.id = Math.floor(Math.random() * 1e6); }
     FolderItem.prototype = { get numItems() { return this.items.length; }, item: function (i) { return this.items[i - 1]; } };
-    function TextLayer(name, text, keys) { this.name = name; this._t = text; this.keys = keys; this.selected = false; this.inPoint = 0; this.outPoint = 10; }
+    function TextLayer(name, text, keys, inP, outP) { this.name = name; this._t = text; this.keys = keys; this.selected = false; this.enabled = true; this.inPoint = inP || 0; this.outPoint = outP === undefined ? 10 : outP; }
     TextLayer.prototype.property = function () {
       var L = this;
       return { property: function () { return {
@@ -142,18 +142,18 @@
         setValueAtKey: function (k, td) { L.keys[k - 1] = td.text; log("After Effects changed keyframe " + k + " of “" + L.name + "” to “" + td.text + "”."); }
       }; } };
     };
-    function CompItem(name, layers) { this.name = name; this.layers = layers; this.id = Math.floor(Math.random() * 1e6); this.time = 0; }
+    function CompItem(name, layers) { this.name = name; this.layers = layers; this.id = Math.floor(Math.random() * 1e6); this.time = 0; this.frameDuration = 1 / 24; this.duration = 10; }
     CompItem.prototype = { get numLayers() { return this.layers.length; }, layer: function (i) { return this.layers[i - 1]; },
       openInViewer: function () { var sel = this.layers.filter(function (l) { return l.selected; }); var c = this; setTimeout(function () {
         var s = c.layers.filter(function (l) { return l.selected; })[0];
         log("After Effects opened “" + c.name + "”" + (s ? " and selected “" + s.name + "”." : "."));
       }, 0); } };
-    window.CompItem = CompItem; window.FolderItem = FolderItem; window.TextLayer = TextLayer;
+    window.CameraLayer = function () {}; window.LightLayer = function () {}; window.CompItem = CompItem; window.FolderItem = FolderItem; window.TextLayer = TextLayer;
     var lower = function () { return new TextLayer("Lower third", "Priya Raman\rHead of Prodcut"); };
     var comps = [
-      new CompItem("01_Intro", [new TextLayer("Title", "Introducing Brightline"), new TextLayer("Subtitle", "Your money,​ sorted in minutes"), lower()]),
-      new CompItem("02_Features", [new TextLayer("Feature 1", "Track evrey bill"), new TextLayer("Feature 2", "Get a alert before you overspend"), new TextLayer("Switch", "", ["Save more", "Spend smater"]), lower()]),
-      new CompItem("03_End_Card", [new TextLayer("Stores", "Available on iOS  and Andriod"), new TextLayer("CTA", "Download now"), lower()])
+      new CompItem("01_Intro", [new TextLayer("Title", "Introducing Brightline", null, 0, 9.875), new TextLayer("Subtitle", "Your money,​ sorted in minutes", null, 0, 9.875), new TextLayer("Lower third", "Priya Raman\rHead of Prodcut", null, 0, 9.875)]),
+      new CompItem("02_Features", [new TextLayer("Feature 1", "Track evrey bill", null, 0, 4), new TextLayer("Feature 2", "Get a alert before you overspend", null, 4 + 2 / 24, 10), new TextLayer("Switch", "", ["Save more", "Spend smater"]), lower()]),
+      new CompItem("03_End_Card", [new TextLayer("Stores", "Available on iOS  and Andriod"), new TextLayer("CTA", "Download now", null, 0, 10 - 3 / 24), lower()])
     ];
     var root = new FolderItem("root", [new FolderItem("Comps", comps), new FolderItem("Old imports", [new CompItem("v1_Title", [new TextLayer("x", "Recieve instant alerts")])])]);
     var all = [];
@@ -183,10 +183,11 @@
     };
   } else {
     // ----------------------------------------------------- Premiere Pro
+    window.Time = function () { this.ticks = "0"; };
     var arr = function (a) { a.numItems = a.length; return a; };
     function textComp(t) { return { matchName: "AE.ADBE Text", displayName: "Text", properties: arr([{ displayName: "Source Text", getValue: function () { return JSON.stringify({ textEditValue: t }); } }]) }; }
-    function clip(name, at, comps, mgt, item) {
-      return { name: name, start: { ticks: String(Math.round(254016000000 * at)), seconds: at },
+    function clip(name, at, comps, mgt, item, dur) {
+      return { name: name, start: { ticks: String(Math.round(254016000000 * at)), seconds: at }, end: { ticks: String(Math.round(254016000000 * (at + (dur || 3)))) },
         components: arr([{ matchName: "AE.ADBE Motion", displayName: "Motion", properties: arr([]) }].concat(comps || [])),
         getMGTComponent: function () { return mgt ? { properties: arr(mgt.map(function (p) { return { displayName: p[0], getValue: function () { return p[1]; } }; })) } : null; },
         projectItem: item || { name: name, getMediaPath: function () { return ""; }, isSequence: function () { return false; } },
@@ -194,9 +195,10 @@
     }
     function seq(name, tracks) {
       var vt = arr(tracks.map(function (c) { return { clips: arr(c) }; })); vt.numTracks = vt.length;
-      return { name: name, sequenceID: name + "-id", timebase: "10584000000", videoTracks: vt,
+      var at = arr([{ clips: arr([]) }, { clips: arr([]) }]); at.numTracks = 2;
+      return { name: name, sequenceID: name + "-id", timebase: "10584000000", videoTracks: vt, end: String(254016000000 * 41.5),
         projectItem: { nodeId: name + "-node" }, getSelection: function () { return []; },
-        audioTracks: { numTracks: 2 }, getPlayerPosition: function () { return { ticks: String(254016000000 * 12) }; },
+        audioTracks: at, getPlayerPosition: function () { return { ticks: String(254016000000 * 12) }; },
         importMGT: function (p, t, v) { log("Premiere placed \u201C" + p.split("/").pop() + "\u201D at the playhead (00:00:12:00) on V" + (v + 1) + "."); return {}; },
         setPlayerPosition: function (t) { log("Premiere moved the playhead to " + tcAt(Number(t) / 254016000000) + " in “" + name + "” and selected the clip."); } };
     }
@@ -206,10 +208,10 @@
       select: function () { log("Premiere selected \u201COld Title Card\u201D in the AE Comps bin of the Project panel."); } };
     var seqs = arr([
       seq("Main Edit 16x9", [
-        [clip("Interview_A.mp4", 0)],
+        [clip("Interview_A.mp4", 0, null, null, null, 20), clip("Interview_B.mp4", 20 + 3 / 24, null, null, null, 21.375)],
         [clip("Graphic", 2, [textComp("Introducing the new Brightline app")]), clip("Graphic", 9.5, [textComp("Your money,​ sorted in minutes")]),
          clip("Lower Third", 15, [], [["Name", "Priya Raman"], ["Title", "Head of Prodcut"], ["Opacity", 100]])],
-        [clip("Graphic", 22, [textComp("Recieve instant alerts")]), clip("End Tag", 38.5, [], null, aep), clip("Old Title Card", 31, [], null, ghost)]
+        [clip("Graphic", 22, [textComp("Recieve instant alerts")], null, null, 9 - 2 / 24), clip("End Tag", 38.5, [], null, aep), clip("Old Title Card", 31, [], null, ghost, 7.5 - 1 / 24)]
       ]),
       seq("Reel 9x16", [
         [clip("Graphic", 1, [textComp("Available now on iOS and Andriod")]), clip("Lower Third", 6, [], [["Name", "Priya Raman"], ["Title", "Head of Prodcut"]])],

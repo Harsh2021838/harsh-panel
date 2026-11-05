@@ -80,3 +80,6 @@ export const Wave = ({ size = 22 }) => (
 export const Shapes = ({ size = 22 }) => (
   <svg {...base(size)}><rect x="3" y="3" width="8" height="8" rx="1.5" /><circle cx="17" cy="7" r="4" /><path d="m7 14 4 7H3z" /><rect x="13" y="13" width="8" height="8" rx="1.5" /></svg>
 );
+export const GapIcon = ({ size = 18 }) => (
+  <svg {...base(size)}><rect x="2.5" y="8" width="7" height="8" rx="1.5" /><rect x="14.5" y="8" width="7" height="8" rx="1.5" /><path d="M12 5v2M12 11v2M12 17v2" /></svg>
+);

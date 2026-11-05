@@ -2,12 +2,12 @@
 <ExtensionManifest
 Version="6.0"
 ExtensionBundleId="com.harsh.panel"
-ExtensionBundleVersion="2.7.3"
+ExtensionBundleVersion="2.8.0"
 ExtensionBundleName="Harsh"
 xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
 >
 <ExtensionList>
-  <Extension Id="com.harsh.panel.main" Version="2.7.3" />
+  <Extension Id="com.harsh.panel.main" Version="2.8.0" />
 </ExtensionList>
 <ExecutionEnvironment>
   <HostList>

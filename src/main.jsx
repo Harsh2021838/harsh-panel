@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { hostApp, hostName, hostBackground, onThemeChange, extensionPath, host } from "./host.js";
-import { Wrench, Image, Helix, Check, Proof, Back, Chevron, Gear, Caret, Plus, Wave } from "./icons.jsx";
+import { Wrench, Image, Helix, Check, Proof, Back, Chevron, Gear, Caret, Plus, Wave, GapIcon } from "./icons.jsx";
 import Settings from "./sections/Settings.jsx";
 import { findUpdate, installUpdate, updateMode, downloadUpdate } from "./updater.js";
 import ClientDNA, { ClientLogo } from "./sections/ClientDNA.jsx";
@@ -9,9 +9,10 @@ import Assets from "./sections/Assets.jsx";
 import { listClients } from "./library.js";
 import TextQC from "./tools/text-qc/TextQC.jsx";
 import SoundKit from "./tools/sound-kit/SoundKit.jsx";
+import GapQC from "./tools/gap-qc/GapQC.jsx";
 import "./styles.css";
 
-const VERSION = "2.7.3";
+const VERSION = "2.8.0";
 
 // The four sections. Add a tool by putting it in a section's `tools` list
 // (or drop a plugin file into /plugins, see plugins/README.md).
@@ -24,6 +25,7 @@ const SECTIONS = [
   {
     id: "qc", name: "QC", icon: Check, empty: "Checks you run before export.", tools: [
       { id: "text-qc", name: "Text QC", description: "Spelling, grammar and spacing in every piece of on-screen text", icon: Proof, hosts: ["AEFT", "PPRO"], Component: TextQC },
+      { id: "gap-qc", name: "Gap QC", description: "Short gaps that flash black, between clips and at the end", icon: GapIcon, hosts: ["AEFT", "PPRO"], Component: GapQC },
     ],
   },
 ];

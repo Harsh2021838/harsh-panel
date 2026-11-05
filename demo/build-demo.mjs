@@ -41,6 +41,7 @@ const data = "window.__DEMO_AEP=" + JSON.stringify(fs.readFileSync("demo/sample.
   ";window.__HOST_FILES=" + JSON.stringify({
     "text-qc.jsx": fs.readFileSync("static/jsx/text-qc.jsx", "utf8"),
     "harsh-library.jsx": fs.readFileSync("static/jsx/harsh-library.jsx", "utf8"),
+    "gap-qc.jsx": fs.readFileSync("static/jsx/gap-qc.jsx", "utf8"),
     "client-sound-kit.jsx": fs.readFileSync("static/jsx/client-sound-kit.jsx", "utf8"),
   }) + ";window.__LIBRARY=" + JSON.stringify(readTree("demo/library")) + ";";
 

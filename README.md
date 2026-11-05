@@ -1,6 +1,6 @@
 # Harsh panel
 
-Panel for Premiere Pro and After Effects: Text QC, Sound Kit, Client DNA, Assets, and a shared Harsh Library.
+Panel for Premiere Pro and After Effects: Text QC, Gap QC, Sound Kit, Client DNA, Assets, and a shared Harsh Library.
 
 ## Install
 
@@ -27,6 +27,7 @@ Makes `dist/Harsh <version>/` and `dist/Harsh-<version>.zip`.
 
 - `src/main.jsx`: the shell (tabs, client switcher, settings, updates).
 - `src/tools/text-qc/`: Text QC (screen, checker, .aep and .prproj readers).
+- `src/tools/gap-qc/`: Gap QC (1-10 frame gaps in Premiere timelines and After Effects comps). Host side: `static/jsx/gap-qc.jsx`.
 - `src/tools/sound-kit/`: Sound Kit (Client Sound Kit, run inside a shadow root; original files in `vendor/`, ExtendScript in `static/jsx/client-sound-kit.jsx`). Its data: `Harsh Library/Tools/Sound Kit/`.
 - `src/sections/`: Client DNA, Assets, Settings.
 - `src/library.js`: the Harsh Library folder; `src/updater.js`: updates.
