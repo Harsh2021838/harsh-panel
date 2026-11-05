@@ -5,6 +5,7 @@ import { expandPremiere } from "./premiere-sources.js";
 import {
   sleep, fmtSecs, lsGet, lsSet, getPaths, getPathsSync, reportDir, loadDict, addToDict, loadCache, saveCache, resetCache,
   normalize, checkTexts, CATS, CAT_BY_ID, buildGroups, writeReport, findAeps, pathMod, fs, lastError,
+  ignoreKey, loadIgnored, saveIgnored,
 } from "./engine.js";
 
 const isAE = hostApp === "AEFT";
@@ -98,7 +99,16 @@ export default function TextQC({ report = () => {} }) {
 
   const set = (k, v) => setSettings((s) => ({ ...s, [k]: v }));
   const fail = (e) => { setErr(e.message || String(e)); setPhase((p) => (p === "done" ? p : "idle")); };
-  const mark = (ids, value) => setMarks((m) => { const n = { ...m }; ids.forEach((id) => { n[id] = value; }); return n; });
+  const mark = (ids, value) => {
+    setMarks((m) => { const n = { ...m }; ids.forEach((id) => { if (value) n[id] = value; else delete n[id]; }); return n; });
+    // Remember Ignore (and un-ignore) for this project, so the next check keeps them hidden.
+    if (run && (value === "ignored" || value === null)) {
+      const set = loadIgnored(run.ignoreScope);
+      groups.filter((g) => ids.indexOf(g.id) !== -1).forEach((g) => { if (value) set.add(ignoreKey(g)); else set.delete(ignoreKey(g)); });
+      saveIgnored(run.ignoreScope, set);
+    }
+  };
+  const [showIgnored, setShowIgnored] = useState(false);
 
   function loadFolders() {
     setErr("");
@@ -176,8 +186,13 @@ export default function TextQC({ report = () => {} }) {
       gs.forEach((g) => g.places.sort((a, b) => (a.time || 0) - (b.time || 0)));
       const order = { typo: 0, garbage: 1, grammar: 2, caps: 3, unknown: 4 };
       gs.sort((a, b) => order[a.cat] - order[b.cat] || (a.places[0].time || 0) - (b.places[0].time || 0));
+      // Hide what was ignored in earlier checks of this project.
+      const ignoreScope = (items[0] && items[0].projectPath) || project || "*";
+      const ignored = loadIgnored(ignoreScope), pre = {};
+      gs.forEach((g) => { if (ignored.has(ignoreKey(g))) pre[g.id] = "ignored"; });
+      setMarks(pre); setShowIgnored(false);
       setRun({ host: hostApp, items, unique: uniq.length, cached, failed, batches, ms: performance.now() - t0,
-        finished: new Date(), project, cancelled: token.current.cancelled, coverage, warnings });
+        finished: new Date(), project, cancelled: token.current.cancelled, coverage, warnings, ignoreScope });
       setGroups(gs);
       setPhase("done");
       if (failed) setErr(plural(failed, "text") + " couldn’t be checked (" + (lastError.message || "no connection") + "). Check again to retry them.");
@@ -240,6 +255,7 @@ export default function TextQC({ report = () => {} }) {
   // ---------------------------------------------------------------- derived
   const busy = phase === "reading" || phase === "checking";
   const live = groups.filter((g) => marks[g.id] !== "ignored");
+  const ignoredGroups = groups.filter((g) => marks[g.id] === "ignored");
   const open_ = live.filter((g) => marks[g.id] !== "fixed");
   const counts = {}; CATS.forEach((c) => { counts[c.id] = 0; });
   open_.forEach((g) => { counts[g.cat] += g.places.length; });
@@ -488,6 +504,23 @@ export default function TextQC({ report = () => {} }) {
             })}
           </ol>
           {shown.length > limit && <button className="ghost wide" onClick={() => setLimit(limit + 200)}>Show {Math.min(200, shown.length - limit)} more</button>}
+          {ignoredGroups.length > 0 && (
+            <div className="ignored">
+              <button className="disclose" aria-expanded={showIgnored} onClick={() => setShowIgnored(!showIgnored)}>
+                {showIgnored ? "Hide ignored" : plural(ignoredGroups.length, "ignored mistake") + ", hidden. Show"}
+              </button>
+              {showIgnored && (
+                <ul className="ignored-list">
+                  {ignoredGroups.map((g) => (
+                    <li key={g.id}>
+                      <span className="trunc grow"><b>{g.bad || CAT_BY_ID[g.cat].label}</b> <span className="dim">in {g.places[0].container}</span></span>
+                      <button className="ghost tight" onClick={() => mark([g.id], null)}>Show again</button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
         </section>
       )}
 

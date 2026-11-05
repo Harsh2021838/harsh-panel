@@ -21,10 +21,6 @@
       "hex": "#1FB5A8"
     }
   ],
-  "highlight": {
-    "name": "Highlighter",
-    "hex": "#FFD43B"
-  },
   "fonts": [
     {
       "name": "Archivo",
@@ -40,5 +36,51 @@
     }
   ],
   "notes": "Keep the logo on Cloud or Midnight, never on orange.\nHighlight one word per line at most.\nCaptions sentence case.",
-  "updated": "2026-11-04T10:00:00Z"
+  "updated": "2026-11-04T10:00:00Z",
+  "highlights": [
+    {
+      "name": "Highlighter",
+      "hex": "#FFD43B"
+    },
+    {
+      "name": "Callout pink",
+      "hex": "#FF4F9A"
+    },
+    {
+      "name": "Mint",
+      "hex": "#5CE1B5"
+    }
+  ],
+  "emails": [
+    "priya@brightline.app",
+    "hello@brightline.app"
+  ],
+  "socials": [
+    {
+      "label": "",
+      "url": "https://www.instagram.com/priyaraman"
+    },
+    {
+      "label": "",
+      "url": "https://www.linkedin.com/in/priyaraman"
+    },
+    {
+      "label": "",
+      "url": "https://x.com/priyabuilds"
+    },
+    {
+      "label": "",
+      "url": "https://www.youtube.com/@brightlineapp"
+    }
+  ],
+  "styleLinks": [
+    {
+      "label": "Caption style and pacing",
+      "url": "https://www.youtube.com/@aliabdaal"
+    },
+    {
+      "label": "Clean motion graphics, lots of white space",
+      "url": "https://vimeo.com/channels/staffpicks"
+    }
+  ]
 }

@@ -10,7 +10,7 @@ import { listClients } from "./library.js";
 import TextQC from "./tools/text-qc/TextQC.jsx";
 import "./styles.css";
 
-const VERSION = "2.5.2";
+const VERSION = "2.6.0";
 
 // The four sections. Add a tool by putting it in a section's `tools` list
 // (or drop a plugin file into /plugins, see plugins/README.md).

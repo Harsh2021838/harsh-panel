@@ -394,4 +394,16 @@ function findAeps(dir, recursive, out) {
 export { sleep, fmtSecs, lsGet, lsSet, getPaths, reportDir, loadDict, addToDict, loadCache, saveCache,
   normalize, checkTexts, CATS, CAT_BY_ID, buildGroups, writeReport, findAeps, pathMod, fs };
 export function getPathsSync() { return paths; }
+
+// ------------------------------------------------- remembered "Ignore"s
+// Kept per project in Tools/Text QC/ignored.json so a re-check doesn't bring them back.
+export function ignoreKey(g) { return [g.cat, g.ruleId, g.bad, normalize(g.text)].join("\u241F"); }
+function ignoredFile() { return pathMod.join(paths.work, "ignored.json"); }
+function readIgnored() { try { return JSON.parse(fs.readFileSync(ignoredFile(), "utf8")); } catch (e) { return {}; } }
+export function loadIgnored(project) { return new Set(readIgnored()[project || "*"] || []); }
+export function saveIgnored(project, set) {
+  const all = readIgnored();
+  all[project || "*"] = Array.from(set);
+  try { fs.writeFileSync(ignoredFile(), JSON.stringify(all), "utf8"); } catch (e) {}
+}
 export function resetCache() { cacheMem = {}; saveCache(); }

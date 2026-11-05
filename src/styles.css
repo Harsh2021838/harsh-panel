@@ -461,3 +461,21 @@ input[type="checkbox"] { accent-color: var(--mark); margin: 0; width: 13px; heig
 .banner { flex: none; display: flex; align-items: center; gap: 6px; padding: 7px 10px 7px 12px; background: var(--mark-soft); border-bottom: 1px solid var(--line); font-size: 12px; font-weight: 500; }
 .banner.done { background: rgba(107, 214, 174, 0.12); color: var(--good); }
 .banner .icon-btn { color: inherit; }
+
+/* client contact + style links */
+.swatches.hl { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); }
+.swatches.hl .swatch.wide { margin-top: 0; }
+.links { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.links li { display: flex; align-items: center; gap: 8px; padding: 5px 2px; border-bottom: 1px solid var(--line); min-width: 0; }
+.links li:last-child { border-bottom: 0; }
+.link-kind { flex: none; width: 76px; color: var(--ink-3); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.link-main { flex: 1; min-width: 0; text-align: left; color: var(--ink); font-size: 12.5px; }
+.link-main:hover { color: var(--mark); text-decoration: underline; }
+:root[data-theme="light"] .link-main:hover { color: #8a6d00; }
+.site-tag { flex: none; min-width: 0; max-width: 78px; font-size: 10.5px; color: var(--ink-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.link-edit { display: flex; flex-direction: column; gap: 5px; margin-bottom: 9px; padding-bottom: 9px; border-bottom: 1px dashed var(--line); }
+.link-edit > input { width: 100%; }
+.link-edit .edit-row { margin-bottom: 0; }
+.ignored { margin-top: 10px; }
+.ignored-list { list-style: none; margin: 6px 0 0; padding: 0 0 0 8px; border-left: 1px solid var(--line); }
+.ignored-list li { display: flex; align-items: center; gap: 8px; padding: 3px 0; font-size: 11.5px; min-width: 0; }

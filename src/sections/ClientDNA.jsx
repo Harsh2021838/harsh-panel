@@ -7,10 +7,35 @@ import {
 
 const isAE = hostApp === "AEFT";
 const EMPTY = { name: "", founder: "", website: "", logo: "", colors: [{ name: "", hex: "" }, { name: "", hex: "" }, { name: "", hex: "" }],
-  highlight: { name: "Highlight", hex: "" }, fonts: [{ name: "", role: "Headings" }, { name: "", role: "Body" }], notes: "" };
+  highlights: [{ name: "Highlight", hex: "" }], fonts: [{ name: "", role: "Headings" }, { name: "", role: "Body" }],
+  emails: [""], socials: [{ label: "", url: "" }], styleLinks: [{ label: "", url: "" }], notes: "" };
+
+/** Highlight colours; older clients stored a single `highlight`. */
+export const highlightsOf = (c) => (c.highlights && c.highlights.length ? c.highlights : c.highlight && c.highlight.hex ? [c.highlight] : []);
+
+// Social sites we recognise from a link, so the list shows "Instagram" instead of a URL.
+const SITES = [
+  [/instagram\.com/i, "Instagram"], [/linkedin\.com/i, "LinkedIn"], [/(^|\.)(x|twitter)\.com/i, "X"], [/youtube\.com|youtu\.be/i, "YouTube"],
+  [/tiktok\.com/i, "TikTok"], [/facebook\.com|fb\.com/i, "Facebook"], [/threads\.net/i, "Threads"], [/behance\.net/i, "Behance"],
+  [/dribbble\.com/i, "Dribbble"], [/github\.com/i, "GitHub"], [/medium\.com/i, "Medium"], [/substack\.com/i, "Substack"], [/vimeo\.com/i, "Vimeo"],
+];
+export function siteOf(url) {
+  const host = hostOf(url).split("/")[0];
+  for (const [re, name] of SITES) if (re.test(host)) return name;
+  return host.replace(/^www\./, "");
+}
+/** "instagram.com/leanspark" -> "@leanspark"; YouTube "@handle" stays; else the short path. */
+export function handleOf(url) {
+  const rest = hostOf(url).split("/").slice(1).filter((x) => x && !/^(in|c|channel|user|company)$/i.test(x));
+  if (!rest.length) return "";
+  const h = decodeURIComponent(rest[0]).replace(/\?.*$/, "");
+  return h.charAt(0) === "@" ? h : "@" + h;
+}
+const withHttps = (u) => { const s = String(u || "").trim(); return s && !/^https?:\/\//i.test(s) ? "https://" + s : s; };
 
 function Monogram({ client, size = 52 }) {
-  const bg = (client.highlight && client.highlight.hex) || (client.colors && client.colors[0] && client.colors[0].hex) || "#444444";
+  const hl = highlightsOf(client)[0];
+  const bg = (hl && hl.hex) || (client.colors && client.colors[0] && client.colors[0].hex) || "#444444";
   const letters = String(client.name || "?").split(/\s+/).map((w) => w.charAt(0)).join("").slice(0, 2).toUpperCase();
   return <span className="monogram" style={{ width: size, height: size, background: bg, color: inkOn(bg), fontSize: size * 0.38 }}>{letters}</span>;
 }
@@ -69,8 +94,14 @@ function View({ client, onEdit, onAssets }) {
         {client.colors && client.colors.length ? (
           <div className="swatches">{client.colors.map((c, i) => <Swatch key={i} c={c} onCopy={copy} onApply={apply} />)}</div>
         ) : <p className="help">No brand colours yet.</p>}
-        {client.highlight && client.highlight.hex && <Swatch c={client.highlight} wide onCopy={copy} onApply={apply} />}
       </section>
+
+      {highlightsOf(client).length > 0 && (
+        <section className="block">
+          <h3 className="block-title">Highlight colours <span className="dim">for highlighted words and accents</span></h3>
+          <div className="swatches hl">{highlightsOf(client).map((c, i) => <Swatch key={i} c={c} wide onCopy={copy} onApply={apply} />)}</div>
+        </section>
+      )}
 
       <section className="block">
         <h3 className="block-title">Fonts</h3>
@@ -92,6 +123,43 @@ function View({ client, onEdit, onAssets }) {
           </ul>
         ) : <p className="help">No fonts yet.</p>}
       </section>
+
+      {((client.emails || []).length > 0 || (client.socials || []).length > 0) && (
+        <section className="block">
+          <h3 className="block-title">Contact</h3>
+          <ul className="links">
+            {(client.emails || []).map((m, i) => (
+              <li key={"m" + i}>
+                <span className="link-kind">Email</span>
+                <button className="link-main trunc" onClick={() => say(copyText(m) ? "Copied " + m + "." : m)} title="Copy">{m}</button>
+                <button className="icon-btn small" onClick={() => say(copyText(m) ? "Copied " + m + "." : m)} aria-label={"Copy " + m}><Copy /></button>
+              </li>
+            ))}
+            {(client.socials || []).map((l, i) => (
+              <li key={"s" + i}>
+                <span className="link-kind">{l.label || siteOf(l.url)}</span>
+                <button className="link-main trunc" onClick={() => openUrl(l.url)} title={l.url}>{handleOf(l.url) || hostOf(l.url)}</button>
+                <button className="icon-btn small" onClick={() => openUrl(l.url)} aria-label={"Open " + l.url}><Link /></button>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      {(client.styleLinks || []).length > 0 && (
+        <section className="block">
+          <h3 className="block-title">Visual style <span className="dim">channels and videos to match</span></h3>
+          <ul className="links">
+            {client.styleLinks.map((l, i) => (
+              <li key={i}>
+                <span className="link-kind">{siteOf(l.url)}</span>
+                <button className="link-main trunc" onClick={() => openUrl(l.url)} title={l.url}>{l.label || hostOf(l.url)}</button>
+                <button className="icon-btn small" onClick={() => openUrl(l.url)} aria-label={"Open " + l.url}><Link /></button>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
 
       <section className="block">
         <h3 className="block-title">Logo and files</h3>
@@ -129,22 +197,37 @@ function ColourRow({ c, onChange, onRemove, label }) {
 }
 
 function Edit({ client, onSaved, onCancel, onRemoved }) {
-  const [c, setC] = useState(() => JSON.parse(JSON.stringify({ ...EMPTY, ...(client || {}), highlight: (client && client.highlight) || EMPTY.highlight })));
+  const [c, setC] = useState(() => {
+    const base = JSON.parse(JSON.stringify({ ...EMPTY, ...(client || {}) }));
+    const atLeastOne = (list, blank) => (list && list.length ? list : [blank]);
+    base.highlights = atLeastOne(client ? highlightsOf(client).map((x) => ({ ...x })) : null, { name: "Highlight", hex: "" });
+    base.emails = atLeastOne(base.emails, "");
+    base.socials = atLeastOne(base.socials, { label: "", url: "" });
+    base.styleLinks = atLeastOne(base.styleLinks, { label: "", url: "" });
+    return base;
+  });
   const [logoSource, setLogoSource] = useState(null);
   const [err, setErr] = useState("");
   const [confirmRemove, setConfirmRemove] = useState(false);
   const set = (k, v) => setC((x) => ({ ...x, [k]: v }));
   const setColour = (i, v) => set("colors", c.colors.map((x, j) => (j === i ? v : x)));
   const setFont = (i, v) => set("fonts", c.fonts.map((x, j) => (j === i ? v : x)));
+  const setAt = (k, i, v) => set(k, c[k].map((x, j) => (j === i ? v : x)));
+  const removeAt = (k, i) => set(k, c[k].filter((_, j) => j !== i));
 
   async function save() {
     if (!c.name.trim()) return setErr("Give the client a name.");
-    const bad = c.colors.concat([c.highlight]).find((x) => x.hex && !validHex(x.hex));
+    const bad = c.colors.concat(c.highlights).find((x) => x.hex && !validHex(x.hex));
+    const badMail = c.emails.find((m) => m.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(m.trim()));
+    if (badMail) return setErr("\u201C" + badMail + "\u201D doesn\u2019t look like an email address.");
     if (bad) return setErr("“" + bad.hex + "” isn’t a colour code. Use six hex digits, like #FF6A3D.");
     try {
       const site = c.website.trim();
       const out = { ...c, name: c.name.trim(), website: site && !/^https?:\/\//i.test(site) ? "https://" + site : site, colors: c.colors.map((x) => ({ name: x.name.trim(), hex: normHex(x.hex) })).filter((x) => x.hex),
-        highlight: c.highlight.hex ? { name: c.highlight.name.trim() || "Highlight", hex: normHex(c.highlight.hex) } : null,
+        highlights: c.highlights.map((x, i) => ({ name: x.name.trim() || "Highlight " + (i + 1), hex: normHex(x.hex) })).filter((x) => x.hex),
+        emails: c.emails.map((m) => m.trim()).filter(Boolean),
+        socials: c.socials.map((l) => ({ label: l.label.trim(), url: withHttps(l.url) })).filter((l) => l.url),
+        styleLinks: c.styleLinks.map((l) => ({ label: l.label.trim(), url: withHttps(l.url) })).filter((l) => l.url),
         fonts: c.fonts.map((f) => ({ name: f.name.trim(), role: f.role.trim() })).filter((f) => f.name) };
       onSaved(await saveClient(out, logoSource));
     } catch (e) { setErr("Couldn’t save: " + e.message); }
@@ -155,7 +238,7 @@ function Edit({ client, onSaved, onCancel, onRemoved }) {
   const logoPreview = logoSource ? fileUrl(logoSource) : client && client.logo ? fileUrl(path.join(client.dir, client.logo)) : null;
 
   return (
-    <form className="edit" onSubmit={(e) => { e.preventDefault(); save(); }}>
+    <form className="edit" noValidate onSubmit={(e) => { e.preventDefault(); save(); }}>
       <h2 className="edit-title">{client ? "Edit " + client.name : "New client"}</h2>
 
       <label className="field"><span>Brand name</span>
@@ -180,8 +263,9 @@ function Edit({ client, onSaved, onCancel, onRemoved }) {
         {c.colors.length < 6 && <button type="button" className="ghost tight add" onClick={() => set("colors", c.colors.concat([{ name: "", hex: "" }]))}><Plus /> Add colour</button>}
       </fieldset>
 
-      <fieldset className="field group"><legend>Highlight colour <span className="dim">for highlighted words and accents in videos</span></legend>
-        <ColourRow c={c.highlight} label="Highlight" onChange={(v) => set("highlight", v)} />
+      <fieldset className="field group"><legend>Highlight colours <span className="dim">for highlighted words and accents in videos</span></legend>
+        {c.highlights.map((x, i) => <ColourRow key={i} c={x} label="Highlight" onChange={(v) => setAt("highlights", i, v)} onRemove={c.highlights.length > 1 ? () => removeAt("highlights", i) : null} />)}
+        {c.highlights.length < 6 && <button type="button" className="ghost tight add" onClick={() => set("highlights", c.highlights.concat([{ name: "", hex: "" }]))}><Plus /> Add highlight colour</button>}
       </fieldset>
 
       <fieldset className="field group"><legend>Fonts</legend>
@@ -193,6 +277,40 @@ function Edit({ client, onSaved, onCancel, onRemoved }) {
           </div>
         ))}
         {c.fonts.length < 6 && <button type="button" className="ghost tight add" onClick={() => set("fonts", c.fonts.concat([{ name: "", role: "" }]))}><Plus /> Add font</button>}
+      </fieldset>
+
+      <fieldset className="field group"><legend>Email</legend>
+        {c.emails.map((m, i) => (
+          <div className="edit-row" key={i}>
+            <input className="grow" type="email" aria-label="Email address" placeholder="founder@leanspark.com" autoComplete="off" spellCheck={false} value={m} onChange={(e) => setAt("emails", i, e.target.value)} />
+            {c.emails.length > 1 && <button type="button" className="icon-btn small" onClick={() => removeAt("emails", i)} aria-label="Remove email"><Close size={13} /></button>}
+          </div>
+        ))}
+        {c.emails.length < 4 && <button type="button" className="ghost tight add" onClick={() => set("emails", c.emails.concat([""]))}><Plus /> Add email</button>}
+      </fieldset>
+
+      <fieldset className="field group"><legend>Social links <span className="dim">the founder&rsquo;s Instagram, LinkedIn, X, YouTube&hellip;</span></legend>
+        {c.socials.map((l, i) => (
+          <div className="edit-row" key={i}>
+            <input className="grow" inputMode="url" aria-label="Social link" placeholder="instagram.com/leanspark" autoComplete="off" spellCheck={false} value={l.url} onChange={(e) => setAt("socials", i, { ...l, url: e.target.value })} />
+            <span className="site-tag" aria-hidden="true">{l.url.trim() ? siteOf(l.url) : ""}</span>
+            {c.socials.length > 1 && <button type="button" className="icon-btn small" onClick={() => removeAt("socials", i)} aria-label="Remove link"><Close size={13} /></button>}
+          </div>
+        ))}
+        {c.socials.length < 10 && <button type="button" className="ghost tight add" onClick={() => set("socials", c.socials.concat([{ label: "", url: "" }]))}><Plus /> Add social link</button>}
+      </fieldset>
+
+      <fieldset className="field group"><legend>Visual style links <span className="dim">channels or videos whose look to follow</span></legend>
+        {c.styleLinks.map((l, i) => (
+          <div className="link-edit" key={i}>
+            <input inputMode="url" aria-label="Style link" placeholder="youtube.com/@channel or a video link" autoComplete="off" spellCheck={false} value={l.url} onChange={(e) => setAt("styleLinks", i, { ...l, url: e.target.value })} />
+            <div className="edit-row">
+              <input className="grow" aria-label="What to take from it" placeholder="What to take from it, e.g. caption style" autoComplete="off" value={l.label} onChange={(e) => setAt("styleLinks", i, { ...l, label: e.target.value })} />
+              {c.styleLinks.length > 1 && <button type="button" className="icon-btn small" onClick={() => removeAt("styleLinks", i)} aria-label="Remove style link"><Close size={13} /></button>}
+            </div>
+          </div>
+        ))}
+        {c.styleLinks.length < 10 && <button type="button" className="ghost tight add" onClick={() => set("styleLinks", c.styleLinks.concat([{ label: "", url: "" }]))}><Plus /> Add style link</button>}
       </fieldset>
 
       <label className="field"><span>Notes</span>
@@ -243,7 +361,7 @@ export default function ClientDNA({ clients, active, onSelect, reload, intent, g
       <div className="screen">
         <div className="empty big-empty">
           <p className="empty-title">Keep every client’s brand in one place</p>
-          <p className="dim">Logo, website, brand colours, highlight colour and fonts. Pick the client once and the panel uses it everywhere.</p>
+          <p className="dim">Logo, website, brand and highlight colours, fonts, contact and style links. Pick the client once and the panel uses it everywhere.</p>
           <button className="primary" onClick={() => setMode("new")}><Plus /> Add your first client</button>
         </div>
       </div>

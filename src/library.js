@@ -91,7 +91,10 @@ export async function saveClient(c, logoSource) {
   ensure(path.join(dir, "Assets"));
   const data = {
     name: c.name || "", founder: c.founder || "", website: c.website || "",
-    logo: c.logo || "", colors: (c.colors || []).filter((x) => x.hex), highlight: c.highlight && c.highlight.hex ? c.highlight : null,
+    logo: c.logo || "", colors: (c.colors || []).filter((x) => x.hex),
+    highlights: (c.highlights || []).filter((x) => x.hex),
+    highlight: (c.highlights || []).filter((x) => x.hex)[0] || null, // older panels read this one
+    emails: (c.emails || []).filter(Boolean), socials: (c.socials || []).filter((l) => l.url), styleLinks: (c.styleLinks || []).filter((l) => l.url),
     fonts: (c.fonts || []).filter((f) => f.name && f.name.trim()), notes: c.notes || "", updated: new Date().toISOString(),
   };
   if (logoSource) {
