@@ -229,6 +229,7 @@ function Edit({ client, onSaved, onCancel, onRemoved }) {
         socials: c.socials.map((l) => ({ label: l.label.trim(), url: withHttps(l.url) })).filter((l) => l.url),
         styleLinks: c.styleLinks.map((l) => ({ label: l.label.trim(), url: withHttps(l.url) })).filter((l) => l.url),
         fonts: c.fonts.map((f) => ({ name: f.name.trim(), role: f.role.trim() })).filter((f) => f.name) };
+      if (!client) { delete out.id; delete out.dir; delete out.logo; } // a new client never reuses another client's folder
       onSaved(await saveClient(out, logoSource));
     } catch (e) { setErr("Couldn’t save: " + e.message); }
   }
@@ -345,12 +346,13 @@ function Edit({ client, onSaved, onCancel, onRemoved }) {
 // ==================================================================== screen
 export default function ClientDNA({ clients, active, onSelect, reload, intent, goAssets }) {
   const [mode, setMode] = useState(null); // null | "new" | "edit"
-  useEffect(() => { if (intent && intent.type === "new") setMode("new"); }, [intent]);
+  const [newCount, setNewCount] = useState(0); // a fresh, empty form every time "New client" is chosen
+  useEffect(() => { if (intent && intent.type === "new") { setMode("new"); setNewCount((n) => n + 1); } }, [intent]);
 
   if (mode) {
     return (
       <div className="screen">
-        <Edit client={mode === "edit" ? active : null} onCancel={() => setMode(null)}
+        <Edit key={mode === "edit" ? "edit-" + (active && active.id) : "new-" + ((intent && intent.n) || 0) + "-" + newCount} client={mode === "edit" ? active : null} onCancel={() => setMode(null)}
           onSaved={async (id) => { await reload(); onSelect(id); setMode(null); }}
           onRemoved={async () => { await reload(); onSelect(null); setMode(null); }} />
       </div>
@@ -362,7 +364,7 @@ export default function ClientDNA({ clients, active, onSelect, reload, intent, g
         <div className="empty big-empty">
           <p className="empty-title">Keep every client’s brand in one place</p>
           <p className="dim">Logo, website, brand and highlight colours, fonts, contact and style links. Pick the client once and the panel uses it everywhere.</p>
-          <button className="primary" onClick={() => setMode("new")}><Plus /> Add your first client</button>
+          <button className="primary" onClick={() => { setMode("new"); setNewCount((n) => n + 1); }}><Plus /> Add your first client</button>
         </div>
       </div>
     );
@@ -375,7 +377,7 @@ export default function ClientDNA({ clients, active, onSelect, reload, intent, g
           {!active && <option value="">Choose a client…</option>}
           {clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
         </select>
-        <button className="ghost" onClick={() => setMode("new")}><Plus /> New</button>
+        <button className="ghost" onClick={() => { setMode("new"); setNewCount((n) => n + 1); }}><Plus /> New</button>
       </div>
       {active ? <View client={active} onEdit={() => setMode("edit")} onAssets={goAssets} />
         : <p className="help pad">Choose a client to see their colours, fonts and logo.</p>}
