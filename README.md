@@ -19,8 +19,9 @@ Makes `dist/Harsh <version>/` and `dist/Harsh-<version>.zip`.
 ## Release a new version
 
 1. Change the version in `package.json`, `static/CSXS/manifest.xml` and `VERSION` in `src/main.jsx`.
-2. Commit, then push a tag: `git tag v2.6.0 && git push origin main v2.6.0`.
-3. GitHub Actions builds it and publishes the release; every panel picks it up within a few hours.
+2. Commit and push to `main`.
+3. GitHub Actions sees a version with no release yet, builds it and publishes release `v<version>`
+   with the zip attached. Every panel picks it up within a few hours (or at once with Check now).
 
 ## Layout
 
