@@ -55,11 +55,16 @@ function lookupLink(links, clip) {
   const file = pathMod.basename(clip.aepPath || "");
   const hit = links.get(name) || links.get(name + "/" + file);
   if (hit) return hit;
-  const want = norm(name.replace(/\/[^/]*\.aep$/i, ""));
-  for (const [k, v] of links) if (norm(k.replace(/\/[^/]*\.aep$/i, "")) === want) return v;
+  const want = norm(name.replace(/\/[^/]*\.aep(\s.*)?$/i, ""));
+  for (const [k, v] of links) if (norm(k.replace(/\/[^/]*\.aep(\s.*)?$/i, "")) === want) return v;
   return null;
 }
-const compNameFor = (clip) => String(clip.itemName || clip.clipName || "").replace(/\/[^/]*\.aep$/i, "").trim();
+// \\Project\\AE comps\\Comp 1/x.aep -> "AE comps" (the bin the clip sits in)
+const binOf = (tree) => {
+  const parts = String(tree || "").split("\\").filter(Boolean);
+  return parts.length > 2 ? parts.slice(1, -1).join(" \u203A ") : parts.length ? "Top of the project" : "";
+};
+const compNameFor = (clip) => String(clip.itemName || clip.clipName || "").replace(/\/[^/]*\.aep(\s.*)?$/i, "").trim();
 
 /**
  * @param pr       result of the host's prCollect
@@ -106,14 +111,16 @@ export function expandPremiere(pr, extra) {
     const c = findByName(project, compNameFor(clip));
     return c ? [c.id] : null;
   };
-  const unmatched = new Map(); // aep path -> clip names
+  const unmatched = new Map(); // aep path -> [{ clip, linkedTo }]
   for (const clip of pr.aeClips || []) {
     const project = readProject(clip.aepPath);
     if (!project) continue;
     const ids = findComps(project, clip);
     if (!ids) {
-      if (!unmatched.has(clip.aepPath)) unmatched.set(clip.aepPath, new Set());
-      unmatched.get(clip.aepPath).add(compNameFor(clip));
+      if (!unmatched.has(clip.aepPath)) unmatched.set(clip.aepPath, []);
+      const byLink = links && lookupLink(links, clip);
+      const linkedTo = byLink && byLink.length ? byLink.map((l) => l.compName).filter(Boolean)[0] || "" : "";
+      unmatched.get(clip.aepPath).push({ clip, linkedTo, saved: !!byLink });
       continue;
     }
     stats.comps++;
@@ -137,10 +144,21 @@ export function expandPremiere(pr, extra) {
       items.push({ key: "aep:" + file + ":" + i, kind: "ae", project: pathMod.basename(file), aepPath: file,
         container: pathMod.basename(file), layer: t.path.concat([t.layer]).join(" \u203A "), text: t.text, time: 1e9 });
     });
-    const list = Array.from(names);
-    warnings.push(plural(list.length, "After Effects clip") + " couldn\u2019t be matched to a comp in " + pathMod.basename(file) +
-      " (" + list.slice(0, 3).join(", ") + (list.length > 3 ? " and " + (list.length - 3) + " more" : "") +
-      "). Save the Premiere project and check again. Meanwhile the rest of " + pathMod.basename(file) + " was checked once; those results have no timecode.");
+    const clips = names.map(({ clip, linkedTo, saved }) => ({
+      ...clip,
+      name: compNameFor(clip),
+      tc: timecode(clip.time, fpsOf(clip.containerId)),
+      trackName: "V" + (Number(clip.track) + 1),
+      bin: binOf(clip.binPath),
+      why: !saved ? "Not in the saved project file yet. Save the Premiere project and check again."
+        : linkedTo ? "Premiere links it to \u201C" + linkedTo + "\u201D, which isn\u2019t in " + pathMod.basename(file) + " any more (deleted, or the .aep was saved over)."
+        : "Its comp isn\u2019t in " + pathMod.basename(file) + " any more.",
+    }));
+    warnings.push({
+      text: plural(clips.length, "After Effects clip") + " couldn\u2019t be matched to a comp in " + pathMod.basename(file) +
+        ". The rest of " + pathMod.basename(file) + " was still checked once; those results have no timecode. Check these by hand:",
+      clips,
+    });
   }
 
   // Captions: files in the project plus files added by hand.

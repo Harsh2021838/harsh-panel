@@ -342,6 +342,7 @@
                         var ae = {};
                         for (var k in base) ae[k] = base[k];
                         ae.aepPath = mp; ae.itemName = pi ? pi.name : clip.name;
+                        try { ae.binPath = String(pi.treePath || ""); ae.nodeId = String(pi.nodeId || ""); } catch (eb) {}
                         ae.key = seq.sequenceID + ":" + t + ":" + c;
                         aeClips.push(ae);
                         continue;
@@ -368,6 +369,23 @@
         for (var i = 0; i < seqs.length; i++) scan(seqs[i], "", 0);
         return { project: projectName, projectPath: projectPath, comps: seqs.length, items: items, aeClips: aeClips,
             fps: fps, captions: captionFiles(app.project.rootItem, [], 0) };
+    };
+
+    // Select a project item in the Project panel (by nodeId) so it can be found by hand.
+    api.prReveal = function (a) {
+        function find(bin, depth) {
+            if (!bin || !bin.children || depth > 30) return null;
+            for (var i = 0; i < bin.children.numItems; i++) {
+                var it = bin.children[i];
+                if (String(it.nodeId) === String(a.nodeId)) return it;
+                if (it.type === 2) { var r = find(it, depth + 1); if (r) return r; }
+            }
+            return null;
+        }
+        var item = find(app.project.rootItem, 0);
+        if (!item) throw new Error("That clip is no longer in the project.");
+        try { item.select(); } catch (e) { throw new Error("Premiere couldn't select it. Look in " + a.binPath); }
+        return { ok: true };
     };
 
     api.prJump = function (a) {

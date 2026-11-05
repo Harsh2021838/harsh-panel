@@ -486,3 +486,12 @@ input[type="checkbox"] { accent-color: var(--mark); margin: 0; width: 13px; heig
 .sound-kit-host { flex: 1; min-height: 0; }
 .sound-kit .note { margin: 8px 12px 0; font-size: 11.5px; }
 .sound-kit .note.bad { color: var(--bad); }
+
+/* Text QC: After Effects clips that couldn't be matched to a comp */
+.lost-clips { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.lost-clips li { display: flex; flex-direction: column; gap: 2px; padding: 7px 8px; border-radius: 6px; background: rgba(0, 0, 0, 0.18); color: var(--ink-2); }
+:root[data-theme="light"] .lost-clips li { background: rgba(0, 0, 0, 0.05); }
+.lost-name { color: var(--ink); font-weight: 600; word-break: break-word; }
+.lost-where { font-size: 11px; }
+.lost-why { font-size: 11px; color: var(--warn); }
+.lost-acts { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }

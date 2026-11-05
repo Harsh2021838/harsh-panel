@@ -11,7 +11,7 @@ import TextQC from "./tools/text-qc/TextQC.jsx";
 import SoundKit from "./tools/sound-kit/SoundKit.jsx";
 import "./styles.css";
 
-const VERSION = "2.7.0";
+const VERSION = "2.7.1";
 
 // The four sections. Add a tool by putting it in a section's `tools` list
 // (or drop a plugin file into /plugins, see plugins/README.md).

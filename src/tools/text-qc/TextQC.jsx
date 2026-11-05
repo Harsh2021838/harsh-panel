@@ -442,7 +442,25 @@ export default function TextQC({ report = () => {} }) {
           )}
           {run.coverage && <p className="help">{coverageText(run.coverage)}</p>}
           {run.cancelled && <p className="help">Stopped early, so some text wasn’t checked.</p>}
-          {run.warnings && run.warnings.map((w, i) => <p key={i} className="msg warn">{w}</p>)}
+          {run.warnings && run.warnings.map((w, i) => typeof w === "string" ? <p key={i} className="msg warn">{w}</p> : (
+            <div key={i} className="msg warn">
+              <p>{w.text}</p>
+              <ul className="lost-clips">
+                {w.clips.map((c) => (
+                  <li key={c.key}>
+                    <span className="lost-name">{c.name}</span>
+                    <span className="lost-where">{c.container} &middot; {c.trackName} &middot; <span className="num">{c.tc}</span></span>
+                    {c.bin && <span className="lost-where">Project panel: {c.bin}</span>}
+                    <span className="lost-why">{c.why}</span>
+                    <span className="lost-acts">
+                      <button className="ghost tight" onClick={() => jump(c)}>Go to in timeline</button>
+                      {c.nodeId && <button className="ghost tight" onClick={() => { setErr(""); host("prReveal", { nodeId: c.nodeId, binPath: c.bin }).catch(fail); }}>Show in project</button>}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))}
           {total > 0 && (
             <div className="summary-acts">
               <button className="primary" disabled={!queue.length} onClick={() => setReview(0)}>Review one by one</button>

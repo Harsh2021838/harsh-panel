@@ -201,12 +201,15 @@
         setPlayerPosition: function (t) { log("Premiere moved the playhead to " + tcAt(Number(t) / 254016000000) + " in “" + name + "” and selected the clip."); } };
     }
     var aep = { name: "End Tag/Brightline_GFX.aep", getMediaPath: function () { return "/Users/harsh/Projects/Brightline/Brightline_GFX.aep"; }, isSequence: function () { return false; } };
+    var ghost = { type: 1, name: "Old Title Card/Brightline_GFX.aep", nodeId: "ghost-1", treePath: "\\Brightline_Launch_v4.prproj\\AE Comps\\Old Title Card/Brightline_GFX.aep",
+      getMediaPath: function () { return "/Users/harsh/Projects/Brightline/Brightline_GFX.aep"; }, isSequence: function () { return false; },
+      select: function () { log("Premiere selected \u201COld Title Card\u201D in the AE Comps bin of the Project panel."); } };
     var seqs = arr([
       seq("Main Edit 16x9", [
         [clip("Interview_A.mp4", 0)],
         [clip("Graphic", 2, [textComp("Introducing the new Brightline app")]), clip("Graphic", 9.5, [textComp("Your money,​ sorted in minutes")]),
          clip("Lower Third", 15, [], [["Name", "Priya Raman"], ["Title", "Head of Prodcut"], ["Opacity", 100]])],
-        [clip("Graphic", 22, [textComp("Recieve instant alerts")]), clip("End Tag", 38.5, [], null, aep)]
+        [clip("Graphic", 22, [textComp("Recieve instant alerts")]), clip("End Tag", 38.5, [], null, aep), clip("Old Title Card", 31, [], null, ghost)]
       ]),
       seq("Reel 9x16", [
         [clip("Graphic", 1, [textComp("Available now on iOS and Andriod")]), clip("Lower Third", 6, [], [["Name", "Priya Raman"], ["Title", "Head of Prodcut"]])],
@@ -216,7 +219,7 @@
     seqs.numSequences = seqs.length;
     window.app = { project: { name: "Brightline_Launch_v4.prproj", path: "/Users/harsh/Projects/Brightline/Brightline_Launch_v4.prproj",
       sequences: seqs, activeSequence: seqs[0],
-      rootItem: { children: arr([{ type: 1, name: "Captions_EN.srt", getMediaPath: function () { return "/Users/harsh/Projects/Brightline/Captions_EN.srt"; } }]),
+      rootItem: { children: arr([{ type: 2, name: "AE Comps", children: arr([ghost]) }, { type: 1, name: "Captions_EN.srt", getMediaPath: function () { return "/Users/harsh/Projects/Brightline/Captions_EN.srt"; } }]),
         createBin: function (n) { var b = { type: 2, name: n, children: arr([]), createBin: function (m) { return { type: 2, name: n + " / " + m, children: arr([]), createBin: this.createBin }; } }; return b; } },
       importFiles: function (paths, x, bin) { log("Premiere imported " + paths.map(function (q) { return q.split("/").pop(); }).join(", ") + " into the \u201C" + bin.name + "\u201D bin."); return true; },
       openSequence: function (id) { var t = seqs.filter(function (q) { return q.sequenceID === id; })[0]; if (t) window.app.project.activeSequence = t; } } };

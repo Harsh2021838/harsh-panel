@@ -35,7 +35,7 @@ export function readDynamicLinks(prprojPath) {
       const hex = /^([0-9a-f]{8})-0000-0000-0000-0{12}/i.exec(s);
       if (hex) compId = parseInt(hex[1], 16);
     }
-    media.set(m[1], { compId, compName: title.replace(/\/[^/]*\.aep$/i, ""), aepPath: path });
+    media.set(m[1], { compId, compName: title.replace(/\/[^/]*\.aep(\s.*)?$/i, ""), aepPath: path });
   }
   if (!media.size) return new Map();
 
@@ -59,7 +59,7 @@ export function readDynamicLinks(prprojPath) {
   while ((m = mcRe.exec(xml))) {
     const body = m[1];
     const name = decode((/<Name>([^<]*)<\/Name>/.exec(body) || [])[1] || "");
-    if (!/\.aep$/i.test(name)) continue;
+    if (!/\.aep(\s|$)/i.test(name)) continue; // "Comp/x.aep" or a duplicate "Comp/x.aep Copy 01"
     const refs = body.match(/<Clip Index="\d+" ObjectRef="(\d+)"/g) || [];
     for (const r of refs) {
       const id = /ObjectRef="(\d+)"/.exec(r)[1];
