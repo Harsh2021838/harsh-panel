@@ -1,7 +1,11 @@
 # Harsh panel
 
-Panel for Premiere Pro and After Effects. Folders: Tools, Assets, Client DNA, QC.
-Tools so far: **Text QC** (QC folder).
+Panel for Premiere Pro and After Effects: Text QC, Client DNA, Assets, and a shared Harsh Library.
+
+## Install
+
+Download the newest `Harsh-x_y_z.zip` from [Releases](../../releases), unzip it and run the installer
+for Mac or Windows. After that the panel updates itself from this page (Settings > Updates).
 
 ## Build
 
@@ -10,18 +14,20 @@ npm install
 npm run build
 ```
 
-This makes `dist/Harsh <version>/` (installer + panel) and `dist/Harsh-<version>.zip`.
-Change the version in `package.json` and `static/CSXS/manifest.xml` together.
+Makes `dist/Harsh <version>/` and `dist/Harsh-<version>.zip`.
+
+## Release a new version
+
+1. Change the version in `package.json`, `static/CSXS/manifest.xml` and `VERSION` in `src/main.jsx`.
+2. Commit, then push a tag: `git tag v2.6.0 && git push origin main v2.6.0`.
+3. GitHub Actions builds it and publishes the release; every panel picks it up within a few hours.
 
 ## Layout
 
-- `src/main.jsx`: the shell (folders, navigation). Add a tool to a folder's `tools` list here.
-- `src/tools/text-qc/`: Text QC screen (`TextQC.jsx`) and checker (`engine.js`).
-- `src/host.js`: talks to Premiere / After Effects.
-- `src/styles.css`: all styling.
-- `static/jsx/text-qc.jsx`: the ExtendScript that runs inside the app (ES3, ASCII only).
-- `static/plugins/`: drop-in tools that don't need a rebuild (see the README there).
-- `scripts/`: the Mac and Windows installers.
-- `demo/`: a clickable web preview with fake Premiere / After Effects (`node demo/build-demo.mjs`).
-
-Adding a tool: read `TOOL-SPEC.md`.
+- `src/main.jsx`: the shell (tabs, client switcher, settings, updates).
+- `src/tools/text-qc/`: Text QC (screen, checker, .aep and .prproj readers).
+- `src/sections/`: Client DNA, Assets, Settings.
+- `src/library.js`: the Harsh Library folder; `src/updater.js`: updates.
+- `static/`: manifest, page, ExtendScript (`jsx/`), fonts, guide, plugins.
+- `scripts/`: installers. `demo/`: clickable web preview.
+- Adding a tool: read `TOOL-SPEC.md`.

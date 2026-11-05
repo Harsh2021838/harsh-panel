@@ -1,0 +1,35 @@
+# Builds the panel and publishes a GitHub release whenever a version tag (v2.5.2, v2.6.0, ...) is pushed.
+# The panel's updater reads the newest release here and downloads the Harsh-*.zip attached to it.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Check the tag matches package.json
+        run: |
+          V=$(node -p "require('./package.json').version")
+          test "v$V" = "${GITHUB_REF_NAME}" || { echo "Tag ${GITHUB_REF_NAME} but package.json says $V"; exit 1; }
+          grep -q "ExtensionBundleVersion=\"$V\"" static/CSXS/manifest.xml || { echo "manifest.xml version differs"; exit 1; }
+      - run: npm run build
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          V=$(node -p "require('./package.json').version")
+          gh release create "${GITHUB_REF_NAME}" dist/Harsh-*.zip \
+            --title "Harsh $V" \
+            --notes "Install: unzip and run the installer, or let the panel update itself (Settings > Updates)."
