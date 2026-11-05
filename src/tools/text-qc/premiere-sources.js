@@ -155,8 +155,9 @@ export function expandPremiere(pr, extra) {
         : "Its comp isn\u2019t in " + pathMod.basename(file) + " any more.",
     }));
     warnings.push({
-      text: plural(clips.length, "After Effects clip") + " couldn\u2019t be matched to a comp in " + pathMod.basename(file) +
-        ". The rest of " + pathMod.basename(file) + " was still checked once; those results have no timecode. Check these by hand:",
+      text: (clips.length === 1 ? "This After Effects clip doesn\u2019t match" : "These " + clips.length + " After Effects clips don\u2019t match") +
+        " a comp in " + pathMod.basename(file) + ", so its text can\u2019t be tied to the timeline. The rest of " + pathMod.basename(file) +
+        " was still checked, without timecodes.",
       clips,
     });
   }

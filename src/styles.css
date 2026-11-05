@@ -206,7 +206,7 @@ input[type="checkbox"] { accent-color: var(--mark); margin: 0; width: 13px; heig
 
 /* ---------------------------------------------------------------- results */
 .results { margin-top: 14px; }
-.chips { display: flex; gap: 4px; overflow-x: auto; padding: 0 16px 2px 0; margin-bottom: 8px; -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 22px), transparent); }
+.chips { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 8px; }
 .chip {
   flex: none; display: inline-flex; align-items: center; gap: 6px; height: 25px; padding: 0 9px;
   border-radius: 13px; border: 1px solid var(--line); color: var(--ink-3); font-size: 11.5px; font-weight: 500;
@@ -232,6 +232,7 @@ input[type="checkbox"] { accent-color: var(--mark); margin: 0; width: 13px; heig
 .row-word { color: var(--ink); font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .row-word .bad { font-weight: 600; text-decoration: underline wavy var(--c); text-decoration-skip-ink: none; text-underline-offset: 3px; text-decoration-thickness: 1.3px; }
 .row-word .to { color: var(--good); font-weight: 500; }
+.row.open .row-head .row-where { display: none; }
 .row-where { display: flex; align-items: center; gap: 6px; min-width: 0; color: var(--ink-3); font-size: 11px; }
 .row-body { padding: 0 2px 12px 18px; display: flex; flex-direction: column; gap: 6px; }
 
@@ -487,11 +488,21 @@ input[type="checkbox"] { accent-color: var(--mark); margin: 0; width: 13px; heig
 .sound-kit .note { margin: 8px 12px 0; font-size: 11.5px; }
 .sound-kit .note.bad { color: var(--bad); }
 
-/* Text QC: After Effects clips that couldn't be matched to a comp */
-.lost-clips { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
-.lost-clips li { display: flex; flex-direction: column; gap: 2px; padding: 7px 8px; border-radius: 6px; background: rgba(0, 0, 0, 0.18); color: var(--ink-2); }
-:root[data-theme="light"] .lost-clips li { background: rgba(0, 0, 0, 0.05); }
-.lost-name { color: var(--ink); font-weight: 600; word-break: break-word; }
-.lost-where { font-size: 11px; }
-.lost-why { font-size: 11px; color: var(--warn); }
+/* Text QC: things to check by hand (unmatched After Effects clips, unreadable files) */
+.manual-flag { display: inline-flex; align-items: center; gap: 7px; align-self: flex-start; color: var(--warn); font-size: 12px; font-weight: 500; }
+.manual-flag i { width: 7px; height: 7px; border-radius: 2px; background: var(--warn); transform: rotate(45deg); }
+.manual-flag:hover { text-decoration: underline; }
+.manual { margin-top: 14px; border-top: 1px solid var(--line); scroll-margin-top: 8px; }
+.manual-head { display: flex; align-items: center; gap: 8px; width: 100%; padding: 11px 2px; text-align: left; font-weight: 600; color: var(--ink); }
+.manual-head svg { color: var(--ink-3); transition: transform 0.15s; }
+.manual-head[aria-expanded="true"] svg { transform: rotate(90deg); }
+.manual-body { display: flex; flex-direction: column; gap: 10px; padding-bottom: 6px; }
+.manual-note { font-size: 11.5px; line-height: 1.45; color: var(--ink-2); }
+.lost-clips { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; }
+.lost-clips li { display: flex; flex-direction: column; gap: 3px; padding: 9px 0 10px 11px; border-left: 2px solid var(--warn); margin-bottom: 6px; }
+.lost-name { color: var(--ink); font-weight: 600; font-size: 12.5px; word-break: break-word; }
+.lost-where { display: flex; flex-wrap: wrap; gap: 4px 10px; font-size: 11.5px; color: var(--ink); }
+.lost-bin { font-size: 11px; color: var(--ink-3); }
+.lost-why { font-size: 11px; line-height: 1.45; color: var(--warn); }
 .lost-acts { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+@media (prefers-reduced-motion: reduce) { .manual-head svg { transition: none; } }

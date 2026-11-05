@@ -109,6 +109,8 @@ export default function TextQC({ report = () => {} }) {
     }
   };
   const [showIgnored, setShowIgnored] = useState(false);
+  const [showManual, setShowManual] = useState(false);
+  const manualRef = useRef(null);
 
   function loadFolders() {
     setErr("");
@@ -258,6 +260,12 @@ export default function TextQC({ report = () => {} }) {
   const ignoredGroups = groups.filter((g) => marks[g.id] === "ignored");
   const open_ = live.filter((g) => marks[g.id] !== "fixed");
   const counts = {}; CATS.forEach((c) => { counts[c.id] = 0; });
+  // Warnings from the last check: plain notes, and After Effects clips that need a look by hand.
+  const manual = { notes: [], groups: [], count: 0 };
+  ((run && run.warnings) || []).forEach((w) => {
+    if (typeof w === "string") { manual.notes.push(w); manual.count++; }
+    else { manual.groups.push(w); manual.count += w.clips.length; }
+  });
   open_.forEach((g) => { counts[g.cat] += g.places.length; });
   const total = CATS.reduce((a, c) => a + counts[c.id], 0);
   const serious = counts.typo + counts.garbage;
@@ -442,25 +450,11 @@ export default function TextQC({ report = () => {} }) {
           )}
           {run.coverage && <p className="help">{coverageText(run.coverage)}</p>}
           {run.cancelled && <p className="help">Stopped early, so some text wasn’t checked.</p>}
-          {run.warnings && run.warnings.map((w, i) => typeof w === "string" ? <p key={i} className="msg warn">{w}</p> : (
-            <div key={i} className="msg warn">
-              <p>{w.text}</p>
-              <ul className="lost-clips">
-                {w.clips.map((c) => (
-                  <li key={c.key}>
-                    <span className="lost-name">{c.name}</span>
-                    <span className="lost-where">{c.container} &middot; {c.trackName} &middot; <span className="num">{c.tc}</span></span>
-                    {c.bin && <span className="lost-where">Project panel: {c.bin}</span>}
-                    <span className="lost-why">{c.why}</span>
-                    <span className="lost-acts">
-                      <button className="ghost tight" onClick={() => jump(c)}>Go to in timeline</button>
-                      {c.nodeId && <button className="ghost tight" onClick={() => { setErr(""); host("prReveal", { nodeId: c.nodeId, binPath: c.bin }).catch(fail); }}>Show in project</button>}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          ))}
+          {manual.count > 0 && (
+            <button className="manual-flag" onClick={() => { setShowManual(true); setTimeout(() => manualRef.current && manualRef.current.scrollIntoView({ behavior: "smooth", block: "start" }), 0); }}>
+              <i aria-hidden="true" />{manual.count === 1 ? "1 thing to check by hand" : manual.count + " things to check by hand"}
+            </button>
+          )}
           {total > 0 && (
             <div className="summary-acts">
               <button className="primary" disabled={!queue.length} onClick={() => setReview(0)}>Review one by one</button>
@@ -537,6 +531,39 @@ export default function TextQC({ report = () => {} }) {
                   ))}
                 </ul>
               )}
+            </div>
+          )}
+        </section>
+      )}
+
+      {run && manual.count > 0 && (
+        <section className="manual" ref={manualRef} aria-label="Check by hand">
+          <button className="manual-head" aria-expanded={showManual} onClick={() => setShowManual(!showManual)}>
+            <span className="grow">Check by hand <span className="num dim">{manual.count}</span></span>
+            <Forward size={14} />
+          </button>
+          {showManual && (
+            <div className="manual-body">
+              {manual.notes.map((w, i) => <p key={"n" + i} className="manual-note">{w}</p>)}
+              {manual.groups.map((w, i) => (
+                <div key={"g" + i}>
+                  <p className="manual-note">{w.text}</p>
+                  <ul className="lost-clips">
+                    {w.clips.map((c) => (
+                      <li key={c.key}>
+                        <span className="lost-name">{c.name}</span>
+                        <span className="lost-where"><span>{c.container}</span><span>{c.trackName}</span><span className="num">{c.tc}</span></span>
+                        {c.bin && <span className="lost-bin">In the {c.bin} bin</span>}
+                        <span className="lost-why">{c.why}</span>
+                        <span className="lost-acts">
+                          <button className="ghost tight" onClick={() => jump(c)}><Target /> Go to</button>
+                          {c.nodeId && <button className="ghost tight" onClick={() => { setErr(""); host("prReveal", { nodeId: c.nodeId, binPath: c.bin }).catch(fail); }}>Show in project</button>}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ))}
             </div>
           )}
         </section>
