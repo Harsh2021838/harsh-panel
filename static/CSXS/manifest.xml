@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<ExtensionManifest
+Version="6.0"
+ExtensionBundleId="com.harsh.panel"
+ExtensionBundleVersion="2.5.2"
+ExtensionBundleName="Harsh"
+xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+>
+<ExtensionList>
+  <Extension Id="com.harsh.panel.main" Version="2.5.2" />
+</ExtensionList>
+<ExecutionEnvironment>
+  <HostList>
+    <Host Name="PPRO" Version="[0.0,99.9]" />
+    <Host Name="AEFT" Version="[0.0,99.9]" />
+  </HostList>
+  <LocaleList>
+    <Locale Code="All" />
+  </LocaleList>
+  <RequiredRuntimeList>
+    <RequiredRuntime Name="CSXS" Version="9.0" />
+  </RequiredRuntimeList>
+</ExecutionEnvironment>
+<DispatchInfoList>
+  <Extension Id="com.harsh.panel.main">
+    <DispatchInfo>
+      <Resources>
+        <MainPath>./main/index.html</MainPath>
+        <CEFCommandLine>
+          <Parameter>--v=0</Parameter>
+          <Parameter>--enable-nodejs</Parameter>
+          <Parameter>--mixed-context</Parameter>
+        </CEFCommandLine>
+      </Resources>
+      <Lifecycle>
+        <AutoVisible>true</AutoVisible>
+      </Lifecycle>
+      <UI>
+        <Type>Panel</Type>
+        <Menu>Harsh</Menu>
+        <Geometry>
+          <Size>
+            <Width>380</Width>
+            <Height>640</Height>
+          </Size>
+        </Geometry>
+        <Icons>
+          <Icon Type="Normal">./icons/panel-icon.png</Icon>
+          <Icon Type="DarkNormal">./icons/panel-icon.png</Icon>
+          <Icon Type="RollOver">./icons/panel-icon.png</Icon>
+          <Icon Type="DarkRollOver">./icons/panel-icon.png</Icon>
+        </Icons>
+      </UI>
+    </DispatchInfo>
+  </Extension>
+</DispatchInfoList>
+</ExtensionManifest>

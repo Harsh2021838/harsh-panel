@@ -1,0 +1,84 @@
+// Bridge between the panel and the Adobe app it is docked in.
+
+export const nodeRequire =
+  typeof window.require === "function" ? window.require
+  : window.cep_node && window.cep_node.require ? window.cep_node.require
+  : null;
+
+const cep = window.__adobe_cep__;
+
+function hostEnv() {
+  try { return JSON.parse(cep.getHostEnvironment()); } catch (e) { return {}; }
+}
+
+/** "PPRO" or "AEFT" */
+export const hostApp = hostEnv().appName || "PPRO";
+export const hostName = hostApp === "AEFT" ? "After Effects" : "Premiere Pro";
+
+/** Filesystem path of the installed extension folder. */
+export function extensionPath() {
+  let dir = decodeURIComponent(new URL("../", location.href).pathname).replace(/\/$/, "");
+  if (/^\/[A-Za-z]:/.test(dir)) dir = dir.slice(1); // Windows: /C:/... -> C:/...
+  return dir;
+}
+
+/** Panel background colour from the app, so the panel matches the user's brightness setting. */
+export function hostBackground() {
+  try {
+    const c = hostEnv().appSkinInfo.panelBackgroundColor.color;
+    return { r: Math.round(c.red), g: Math.round(c.green), b: Math.round(c.blue) };
+  } catch (e) { return { r: 35, g: 35, b: 35 }; }
+}
+export function onThemeChange(fn) {
+  try { cep.addEventListener("com.adobe.csxs.events.ThemeColorChanged", fn); } catch (e) {}
+}
+
+export function evalRaw(code) {
+  return new Promise((resolve) => cep.evalScript(code, resolve));
+}
+
+const loaded = {};
+/** Load an ExtendScript file from <extension>/jsx once per session. */
+function ensureScript(file, globalName) {
+  if (loaded[file]) return Promise.resolve();
+  const p = extensionPath() + "/jsx/" + file;
+  return evalRaw("$.evalFile(" + JSON.stringify(p) + "); typeof $." + globalName).then((r) => {
+    if (r !== "object") throw new Error("Couldn't load " + file + " into " + hostName + ". Restart " + hostName + " and try again.");
+    loaded[file] = true;
+  });
+}
+
+/**
+ * Make a caller for one tool's ExtendScript file.
+ *   const call = makeHost("my-tool.jsx", "HarshMyTool");
+ *   const data = await call("collect", { mode: "all" });
+ * The .jsx must define $.HarshMyTool = { call: function (name, arg) { ... return JSON string {ok, data|error} } }.
+ */
+export function makeHost(file, globalName) {
+  return function (name, arg) {
+    return ensureScript(file, globalName)
+      .then(() => evalRaw("$." + globalName + ".call(" + JSON.stringify(name) + "," + JSON.stringify(arg || {}) + ")"))
+      .then((raw) => {
+        let r;
+        try { r = JSON.parse(raw); } catch (e) {
+          throw new Error(raw === "EvalScript error."
+            ? hostName + " is busy, probably with a dialog open. Close it and try again."
+            : "Unexpected reply from " + hostName + ": " + String(raw).slice(0, 120));
+        }
+        if (!r.ok) throw new Error(r.error);
+        return r.data;
+      });
+  };
+}
+
+/** Text QC's commands. */
+export const host = makeHost("text-qc.jsx", "HarshTextQC");
+
+export function pickFiles(title, ext) {
+  const r = window.cep.fs.showOpenDialogEx(true, false, title, null, ext ? [ext] : []);
+  return r && r.data ? r.data : [];
+}
+export function pickFolder(title) {
+  const r = window.cep.fs.showOpenDialogEx(false, true, title, null, []);
+  return r && r.data && r.data[0] ? r.data[0] : null;
+}

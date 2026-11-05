@@ -1,0 +1,31 @@
+{
+  "name": "Northpeak Studio",
+  "founder": "Daniel Okafor",
+  "website": "northpeak.studio",
+  "logo": "",
+  "colors": [
+    {
+      "name": "Pine",
+      "hex": "#1E4D3A"
+    },
+    {
+      "name": "Snow",
+      "hex": "#FAFAF7"
+    },
+    {
+      "name": "Clay",
+      "hex": "#C8693E"
+    }
+  ],
+  "highlight": {
+    "name": "Signal",
+    "hex": "#7CF0B5"
+  },
+  "fonts": [
+    {
+      "name": "Archivo",
+      "role": "Everything"
+    }
+  ],
+  "notes": ""
+}

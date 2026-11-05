@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Harsh panel: editor guide</title>
+<style>
+  :root { --blue: #1c83ff; --text: #1d1d1f; --muted: #5f6368; --line: #e3e5e8; --bg: #ffffff; --soft: #f4f7fb; --red: #c62828; }
+  @media (prefers-color-scheme: dark) {
+    :root { --text: #e8e8ea; --muted: #a0a3a8; --line: #2e3035; --bg: #17181a; --soft: #1f2126; --red: #ff6b5e; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  main { max-width: 760px; margin: 0 auto; padding: 40px 20px 80px; }
+  header { display: flex; align-items: center; gap: 14px; margin-bottom: 8px; }
+  header .mark { width: 44px; height: 44px; border-radius: 10px; }
+  h1 { font-size: 28px; margin: 0; }
+  h2 { font-size: 20px; margin: 40px 0 10px; padding-top: 16px; border-top: 1px solid var(--line); }
+  h3 { font-size: 16px; margin: 22px 0 6px; }
+  p, li { color: var(--text); }
+  .lead { color: var(--muted); margin: 0 0 24px; }
+  ol, ul { padding-left: 22px; }
+  li { margin: 4px 0; }
+  .box { background: var(--soft); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; margin: 14px 0; }
+  .warn { border-color: var(--red); }
+  .warn strong { color: var(--red); }
+  kbd, code { font: 14px ui-monospace, Menlo, Consolas, monospace; background: var(--soft); border: 1px solid var(--line); border-radius: 5px; padding: 1px 6px; }
+  .cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; }
+  .cols .box { margin: 0; }
+  nav a { color: var(--blue); margin-right: 14px; text-decoration: none; }
+</style>
+</head>
+<body>
+<main>
+  <header><img class="mark" alt="" src="data:image/png;base64,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"><h1>Harsh panel</h1></header>
+  <p class="lead">For Premiere Pro and After Effects 2022 and later, on Windows and Mac.</p>
+  <nav><a href="#install">Install</a><a href="#client-dna">Client DNA</a><a href="#assets">Assets</a><a href="#text-qc">Text QC</a><a href="#settings">Settings and your library</a><a href="#help">If something goes wrong</a><a href="#updates">Updates</a></nav>
+
+  <h2 id="install">Install (once)</h2>
+  <p>Unzip the download first. Keep everything in the folder together.</p>
+  <div class="cols">
+    <div class="box">
+      <h3>Windows</h3>
+      <ol>
+        <li>Quit Premiere Pro and After Effects.</li>
+        <li>Double-click <strong>Install Harsh (Windows).bat</strong>.</li>
+        <li>If Windows says &ldquo;Windows protected your PC&rdquo;, click <strong>More info</strong>, then <strong>Run anyway</strong>.</li>
+        <li>When it says Done, press any key.</li>
+      </ol>
+    </div>
+    <div class="box">
+      <h3>Mac</h3>
+      <ol>
+        <li>Quit Premiere Pro and After Effects.</li>
+        <li><strong>Right-click</strong> <strong>Install Harsh (Mac).command</strong> and choose <strong>Open</strong>, then <strong>Open</strong> again. (macOS blocks double-clicking it the first time.)</li>
+        <li>When it says Done, press Enter.</li>
+      </ol>
+    </div>
+  </div>
+  <p>Then open Premiere Pro or After Effects and choose <strong>Window &gt; Extensions &gt; Harsh</strong>. Dock the panel wherever you like; the app remembers it.</p>
+
+  <h2 id="client-dna">Client DNA</h2>
+  <p>Each client&rsquo;s brand in one place: logo, website, brand colours, the highlight colour you use in videos, fonts and notes. Choose the client once with the button at the top right of the panel; Client DNA and Assets then show that client.</p>
+  <ol>
+    <li>Open the <strong>Client DNA</strong> tab and click <strong>New</strong> (or <strong>Add your first client</strong>).</li>
+    <li>Fill in the brand name, founder and website, choose the logo file, and add 3&ndash;4 brand colours (pick them or paste the code, like #FF6A3D), the highlight colour and 3&ndash;4 fonts with what each is used for. Click <strong>Add client</strong>.</li>
+  </ol>
+  <ul>
+    <li><strong>Click a colour</strong> to copy its code, ready to paste into Premiere or After Effects.</li>
+    <li><strong>In After Effects</strong>, select text or shape layers and click a colour&rsquo;s brush to apply it. <kbd>Cmd/Ctrl+Z</kbd> undoes it.</li>
+    <li>Fonts not installed on this computer are marked, so you know before you start.</li>
+    <li><strong>Import logo</strong> puts the logo in a &ldquo;Harsh / client name&rdquo; bin (Premiere) or folder (After Effects).</li>
+  </ul>
+
+  <h2 id="assets">Assets</h2>
+  <p>Files you reuse: stick figures, logos, icons, sounds, templates. Each client has their own assets, and <strong>Common</strong> holds the ones for everyone.</p>
+  <ul>
+    <li><strong>Add files</strong>, or drag files from Finder or Explorer onto the panel. Folders you make inside the assets folder (like &ldquo;Stick figures&rdquo;) show as groups.</li>
+    <li>Click assets to select them, then <strong>Import</strong>. Double-click imports one straight away.</li>
+    <li>In Premiere, a selected template (.mogrt) can go straight onto the timeline with <strong>At playhead</strong>.</li>
+    <li><strong>Remove</strong> moves files to the library&rsquo;s _Removed folder; nothing is deleted.</li>
+  </ul>
+  <div class="box">Everything is saved in your Harsh Library (see <a href="#settings">Settings</a>).</div>
+
+  <h2 id="text-qc">Text QC</h2>
+  <p>Finds typos and grammar mistakes in on-screen text before you export. Open the <strong>QC</strong> tab at the bottom of the panel, then <strong>Text QC</strong>.</p>
+
+  <h3>In After Effects</h3>
+  <ol>
+    <li>Pick what to check: <strong>All comps</strong>, <strong>Selected</strong> (select comps in the Project panel first), <strong>Folders</strong> (untick imported or old folders) or <strong>Other projects</strong> (add .aep files or a whole folder).</li>
+    <li>Click <strong>Check text</strong>. Reading the project takes a moment; the spelling check runs in the background, so you can keep working.</li>
+    <li>Each mistake is underlined. Click the green suggestion to change it in the layer. If the same text is used in several comps, it changes in all of them.</li>
+    <li><strong>Go to</strong> opens the comp and selects the layer. <strong>Add to dictionary</strong> stops a name or brand being flagged again.</li>
+  </ol>
+  <div class="box">Every change can be undone with <kbd>Cmd/Ctrl+Z</kbd>. If a layer mixes fonts or colours in one line, look at it after the change. Text that comes from an expression has to be fixed in the expression.</div>
+
+  <h3>In Premiere Pro</h3>
+  <p>One check covers everything Premiere can show on screen:</p>
+  <ul>
+    <li><strong>Titles</strong> made with the Type tool or Essential Graphics.</li>
+    <li><strong>Templates</strong> (MOGRTs): every text field.</li>
+    <li><strong>After Effects comps</strong> in the timeline (Dynamic Link or &ldquo;Replace with After Effects Composition&rdquo;), including text inside their precomps. The .aep file is read directly; After Effects doesn&rsquo;t need to be open.</li>
+    <li><strong>Captions</strong>: caption files imported into the project are found automatically. For captions made in Premiere (Speech to Text or the caption tool), select the caption track, choose <strong>File &gt; Export &gt; Captions</strong>, save as .srt, and click <strong>Add .srt</strong> once.</li>
+  </ul>
+  <ol>
+    <li>Pick <strong>All sequences</strong> or <strong>Open sequence</strong> (this one also looks inside nested sequences), then click <strong>Check text</strong>.</li>
+    <li>Each result shows where it is: the kind (Title, Template, AE comp, Caption), the sequence and the timecode. <strong>Go to</strong> moves the playhead there and selects the clip.</li>
+    <li>Fix titles in the Essential Graphics panel and comps in After Effects, then click <strong>Check again</strong>; only changed text is checked again.</li>
+  </ol>
+  <div class="box warn"><strong>Not checked:</strong> Legacy Titles, and text that&rsquo;s part of a rendered video file. After Effects text driven by an expression is checked as typed, before the expression runs. If a moved .aep can&rsquo;t be found, the results say so.</div>
+
+  <h3>Reading the results</h3>
+  <ul>
+    <li>The big number is how many mistakes need fixing; the coloured bar shows the mix. <strong>Review one by one</strong> walks through them: <kbd>&rarr;</kbd> next, <kbd>&larr;</kbd> back, <kbd>Enter</kbd> uses the first suggestion (After Effects), <kbd>G</kbd> goes to it, <kbd>I</kbd> ignores it, <kbd>Esc</kbd> closes.</li>
+    <li>Or tap any row in the list to see the full text, every place it appears, and the fix buttons.</li>
+    <li><strong>Typos</strong> and <strong>Odd characters</strong> (invisible characters, missing glyphs, double spaces) are the ones to fix. <strong>Grammar</strong> is worth a look. <strong>Capitals</strong> and <strong>Unknown words</strong> are hidden at first; click them to show.</li>
+    <li><strong>Export report</strong> saves a page with every mistake, a per-project summary and the comps with the most problems, to share with the team.</li>
+    <li>Text that hasn&rsquo;t changed is remembered, so checking again is instant.</li>
+  </ul>
+
+  <h3>Very big jobs</h3>
+  <p>The free spelling server handles about 65,000 characters a minute and waits on its own if a job goes over. For no limit, run LanguageTool on your computer and enter its address (for example <code>http://localhost:8081</code>) in <strong>Settings &gt; Spelling server</strong>, or add a LanguageTool Premium username and API key.</p>
+
+  <h2 id="settings">Settings and your library</h2>
+  <p>Everything the panel saves lives in one folder, the <strong>Harsh Library</strong>: every client&rsquo;s DNA, logo, assets, SFX and reusable comps, plus each tool&rsquo;s own data (like the Text QC dictionary and reports). Open <strong>Settings</strong> with the gear at the top right.</p>
+  <ul>
+    <li><strong>Change location</strong>: pick a folder. Choose <strong>Copy my library there</strong> to move everything (the old folder is left as it is), or point at a folder that already has a Harsh Library, for example on your team&rsquo;s Dropbox.</li>
+    <li><strong>Save a backup</strong>: makes a dated copy of the whole library wherever you choose.</li>
+    <li><strong>Export</strong> a client: one folder with everything for that client, to send to someone or move to another computer. <strong>Import a client folder</strong> brings it in.</li>
+  </ul>
+  <p>Inside the library: <code>Clients/</code> (a folder per client), <code>Common/</code> (assets, SFX and comps for every client), <code>Tools/</code> (each tool&rsquo;s data) and <code>_Removed/</code> (anything you remove).</p>
+
+  <h2 id="help">If something goes wrong</h2>
+  <ul>
+    <li><strong>The panel isn&rsquo;t in Window &gt; Extensions.</strong> Restart the app. Still missing: run the installer again.</li>
+    <li><strong>&ldquo;Busy, probably with a dialog open&rdquo;.</strong> Close the open dialog in Premiere or After Effects and try again.</li>
+    <li><strong>&ldquo;Couldn&rsquo;t be checked&rdquo;.</strong> No internet, or the spelling server was down. Click <strong>Check again</strong>; only those texts are retried. <strong>Settings &gt; Test Connection</strong> checks the link.</li>
+    <li>Anything else: message Harsh with a screenshot of the panel.</li>
+  </ul>
+
+  <h2 id="updates">Updates</h2>
+  <p>New versions come as a Harsh zip (like <code>Harsh-2_5_0.zip</code>). Two ways to install one:</p>
+  <ul>
+    <li><strong>Automatically:</strong> once an update source is set in <strong>Settings &gt; Updates</strong>, new versions download by themselves (when the panel opens and every few hours) into the Updates folder.</li>
+    <li><strong>Updates folder:</strong> put the zip in the <code>Updates</code> folder of your Harsh Library. The panel finds it when it opens. In <strong>Settings &gt; Updates</strong>, choose <strong>Ask me first</strong> (a yellow bar offers <strong>Install now</strong>) or <strong>Install automatically</strong>. If your library is on a shared drive, everyone on the team gets it.</li>
+    <li><strong>By hand:</strong> <strong>Settings &gt; Updates &gt; Install from file</strong> and choose the zip.</li>
+  </ul>
+  <p>Before installing, the current version is copied to the library&rsquo;s <code>_Removed</code> folder, so you can always go back. The panel reloads by itself; if anything looks odd afterwards, restart Premiere or After Effects. Running the installer from the zip also still works.</p>
+</main>
+</body>
+</html>

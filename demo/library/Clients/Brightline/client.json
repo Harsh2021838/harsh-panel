@@ -1,0 +1,44 @@
+{
+  "name": "Brightline",
+  "founder": "Priya Raman",
+  "website": "https://brightline.app",
+  "logo": "logo.svg",
+  "colors": [
+    {
+      "name": "Spark orange",
+      "hex": "#FF6A3D"
+    },
+    {
+      "name": "Midnight",
+      "hex": "#16213E"
+    },
+    {
+      "name": "Cloud",
+      "hex": "#F4F1EC"
+    },
+    {
+      "name": "Teal",
+      "hex": "#1FB5A8"
+    }
+  ],
+  "highlight": {
+    "name": "Highlighter",
+    "hex": "#FFD43B"
+  },
+  "fonts": [
+    {
+      "name": "Archivo",
+      "role": "Headings"
+    },
+    {
+      "name": "Georgia",
+      "role": "Quotes"
+    },
+    {
+      "name": "Inter",
+      "role": "Body"
+    }
+  ],
+  "notes": "Keep the logo on Cloud or Midnight, never on orange.\nHighlight one word per line at most.\nCaptions sentence case.",
+  "updated": "2026-11-04T10:00:00Z"
+}
