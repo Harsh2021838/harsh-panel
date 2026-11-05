@@ -1,0 +1,2144 @@
+/* Client Sound Kit - panel logic */
+(function () {
+  'use strict';
+
+  var MIN_DB = -40, MAX_DB = 6;
+  var AUDIO_EXT = /\.(wav|mp3|aif|aiff|m4a|aac|flac|ogg|wma)$/i;
+
+  // Premiere Pro's 16 label colours, in label index order (default colours).
+  var LABELS = [
+    { name: 'Violet', hex: '#a990dd' }, { name: 'Iris', hex: '#e384ae' },
+    { name: 'Caribbean', hex: '#1db3a3' }, { name: 'Lavender', hex: '#d29ff0' },
+    { name: 'Cerulean', hex: '#1e9be3' }, { name: 'Forest', hex: '#5d9f43' },
+    { name: 'Rose', hex: '#e56ba3' }, { name: 'Mango', hex: '#f39a2f' },
+    { name: 'Purple', hex: '#9c49d9' }, { name: 'Blue', hex: '#3f62e8' },
+    { name: 'Teal', hex: '#2bb5b8' }, { name: 'Magenta', hex: '#e636b5' },
+    { name: 'Tan', hex: '#d8b38a' }, { name: 'Green', hex: '#3fc244' },
+    { name: 'Brown', hex: '#9e6533' }, { name: 'Yellow', hex: '#e4d83a' }
+  ];
+  var DEFAULT_SFX_COLORS = [13, 8, 9, 7, 2, 6, 15, 4];
+  var TAGS = [
+    { id: 'intro', name: 'Intro', color: 3 },
+    { id: 'middle', name: 'Middle', color: 10 },
+    { id: 'ending', name: 'Ending', color: 8 }
+  ];
+  var KIND_NAMES = { sfx: 'sound effects', part: 'BGM parts', bgm: 'full BGM tracks' };
+
+  // ---------- Host bridge ----------
+  var inCEP = typeof window.__adobe_cep__ !== 'undefined';
+  function host(script) {
+    return new Promise(function (resolve) {
+      if (!inCEP) return resolve('ERR|Open this panel inside Premiere Pro to use this.');
+      window.__adobe_cep__.evalScript(script, function (r) { resolve(String(r || '')); });
+    });
+  }
+  function q(v) { return JSON.stringify(String(v)); }
+  function hostJson(script) {
+    return host(script).then(function (r) {
+      if (r.indexOf('OK|') !== 0) throw new Error(r.split('|').slice(1).join('|') || 'Premiere didn’t respond.');
+      return JSON.parse(r.slice(3));
+    });
+  }
+
+  // ---------- Storage (Documents/ClientSoundKit/library.json) ----------
+  var nodeFs = null, nodePath = null, LIB_DIR = '', LIB_FILE = '';
+  try {
+    nodeFs = window.require('fs'); nodePath = window.require('path');
+    LIB_DIR = nodePath.join(window.require('os').homedir(), 'Documents', 'ClientSoundKit');
+    LIB_FILE = nodePath.join(LIB_DIR, 'library.json');
+  } catch (e) { nodeFs = null; }
+
+  function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 7); }
+
+  function defaultLib() {
+    var id = uid();
+    return { version: 3, activeClient: id, activeKind: 'sfx', ignored: {},
+      clients: [{ id: id, name: 'My first client', assets: [] }] };
+  }
+
+  function migrate(l) {
+    l.clients.forEach(function (c) {
+      c.assets.forEach(function (a, i) {
+        delete a.count; delete a.gap;
+        if (a.color == null) a.color = a.kind === 'bgm' ? 3 : DEFAULT_SFX_COLORS[i % DEFAULT_SFX_COLORS.length];
+        if (a.track == null) a.track = a.kind === 'sfx' ? 1 : 3;
+        if (a.kind === 'part') {
+          if (!a.keys) a.keys = [];
+          if (!a.tag) a.tag = 'intro';
+          if (a.in == null) a.in = 0;
+          if (a.out == null) a.out = 6;
+          if (!a.mode) a.mode = 'media';
+        }
+      });
+    });
+    if (!l.ignored) l.ignored = {};
+    l.version = 3;
+    return l;
+  }
+
+  function loadLib() {
+    try {
+      var raw = nodeFs
+        ? (nodeFs.existsSync(LIB_FILE) ? nodeFs.readFileSync(LIB_FILE, 'utf8') : null)
+        : window.localStorage.getItem('csk-library');
+      if (raw) {
+        var l = JSON.parse(raw);
+        if (l && Array.isArray(l.clients) && l.clients.length) return migrate(l);
+      }
+    } catch (e) { setTimeout(function () { setStatus('Couldn’t read the library file, started fresh: ' + e.message, 'err'); }); }
+    return defaultLib();
+  }
+
+  var saveTimer = null;
+  function save() {
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(function () {
+      var raw = JSON.stringify(lib);
+      try {
+        if (nodeFs) {
+          if (!nodeFs.existsSync(LIB_DIR)) nodeFs.mkdirSync(LIB_DIR, { recursive: true });
+          var tmp = LIB_FILE + '.tmp';
+          nodeFs.writeFileSync(tmp, raw, 'utf8');
+          nodeFs.renameSync(tmp, LIB_FILE);
+        } else {
+          window.localStorage.setItem('csk-library', raw);
+        }
+      } catch (e) { setStatus('Couldn’t save: ' + e.message, 'err'); }
+    }, 250);
+  }
+
+  var lib = loadLib();
+
+  // ---------- Helpers ----------
+  var $ = function (s) { return document.querySelector(s); };
+  function client() {
+    return lib.clients.find(function (c) { return c.id === lib.activeClient; }) || lib.clients[0];
+  }
+  function clamp(v, a, b) { return Math.min(b, Math.max(a, v)); }
+  function baseName(p) { return String(p).split(/[\\/]/).pop().replace(/\.[^.]+$/, ''); }
+  function fileExists(p) { try { return nodeFs ? nodeFs.existsSync(p) : true; } catch (e) { return true; } }
+  function fmtDb(db) {
+    var n = Math.round(Number(db) * 10) / 10;
+    return (n > 0 ? '+' : n < 0 ? '−' : '') + Math.abs(n).toFixed(1).replace(/\.0$/, '') + ' dB';
+  }
+  function fmtSec(s) { return (Math.round(s * 100) / 100).toFixed(2) + ' s'; }
+  function esc(s) {
+    return String(s).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  }
+  function fileUrl(p) {
+    var s = String(p).replace(/\\/g, '/');
+    return encodeURI('file://' + (s.charAt(0) === '/' ? '' : '/') + s).replace(/#/g, '%23');
+  }
+  function tagOf(id) { return TAGS.find(function (t) { return t.id === id; }) || TAGS[0]; }
+  function partLen(a) { return Math.max(0, (a.out || 0) - (a.in || 0)); }
+  function volLabel(a) {
+    if (a.inFile && a.kind === 'part' && (!a.keys || !a.keys.length) && !a.db) return a.inFile;
+    if (a.kind === 'part' && a.keys && a.keys.length > 1) {
+      return fmtDb(a.keys[0][1]).replace(' dB', '') + ' → ' + fmtDb(a.keys[a.keys.length - 1][1]);
+    }
+    if (a.kind === 'part' && a.keys && a.keys.length === 1) return fmtDb(a.keys[0][1]);
+    return fmtDb(a.db);
+  }
+  function timecode(sec, fps) {
+    var f = Math.round(fps || 25), total = Math.round(sec * (fps || 25));
+    var fr = total % f, s = Math.floor(total / f), p = function (n) { return (n < 10 ? '0' : '') + n; };
+    return p(Math.floor(s / 3600)) + ':' + p(Math.floor(s / 60) % 60) + ':' + p(s % 60) + ':' + p(fr);
+  }
+
+  var statusEl = $('#status');
+  function setStatus(msg, kind) {
+    statusEl.textContent = msg;
+    statusEl.className = 'status' + (kind ? ' ' + kind : '');
+  }
+
+  // ---------- Audio decoding & analysis ----------
+  var actx = null;
+  function audioCtx() { return actx || (actx = new (window.AudioContext || window.webkitAudioContext)()); }
+
+  function readFile(path) {
+    if (nodeFs) {
+      return new Promise(function (res, rej) {
+        nodeFs.readFile(path, function (err, buf) {
+          if (err) rej(err); else res(buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength));
+        });
+      });
+    }
+    return new Promise(function (res, rej) {
+      var x = new XMLHttpRequest();
+      x.open('GET', fileUrl(path)); x.responseType = 'arraybuffer';
+      x.onload = function () { x.response ? res(x.response) : rej(new Error('empty')); };
+      x.onerror = function () { rej(new Error('read failed')); };
+      x.send();
+    });
+  }
+
+  // Keeps a few decoded files in memory so hovering, dragging and checking stay fast.
+  var bufCache = [], BUF_LIMIT = 6;
+  function decode(path) {
+    for (var i = 0; i < bufCache.length; i++) {
+      if (bufCache[i].path === path) { var hit = bufCache.splice(i, 1)[0]; bufCache.unshift(hit); return hit.p; }
+    }
+    var p = readFile(path).then(function (ab) {
+      return new Promise(function (res, rej) { audioCtx().decodeAudioData(ab, res, rej); });
+    });
+    bufCache.unshift({ path: path, p: p });
+    if (bufCache.length > BUF_LIMIT) bufCache.length = BUF_LIMIT;
+    p.catch(function () { bufCache = bufCache.filter(function (b) { return b.p !== p; }); });
+    return p;
+  }
+
+  // Waveform peaks + envelope for [from, to] seconds of the buffer.
+  function analyzeBuffer(buf, from, to) {
+    var sr = buf.sampleRate, ch = buf.numberOfChannels, data = [], c;
+    for (c = 0; c < ch; c++) data.push(buf.getChannelData(c));
+    var s0 = clamp(Math.floor((from || 0) * sr), 0, buf.length);
+    var s1 = clamp(to ? Math.floor(to * sr) : buf.length, s0 + 1, buf.length);
+    var n = s1 - s0;
+    var BINS = n / sr > 30 ? 640 : 320, peaks = new Array(BINS), per = Math.max(1, Math.floor(n / BINS));
+    for (var b = 0; b < BINS; b++) {
+      var m = 0, a0 = s0 + b * per, a1 = Math.min(s1, a0 + per);
+      for (var i = a0; i < a1; i += 2) {
+        var v = 0; for (c = 0; c < ch; c++) v += Math.abs(data[c][i]);
+        v /= ch; if (v > m) m = v;
+      }
+      peaks[b] = m;
+    }
+    var pmax = Math.max.apply(null, peaks) || 1;
+    peaks = peaks.map(function (p) { return Math.round((p / pmax) * 1000) / 1000; });
+    var hop = 256, win = 1024, env = [];
+    for (var s = s0; s + hop <= s1; s += hop) {
+      var sum = 0, e = Math.min(s1, s + win), cnt = 0;
+      for (var k = s; k < e; k += 2) {
+        var x = 0; for (c = 0; c < ch; c++) x += data[c][k];
+        x /= ch; sum += x * x; cnt++;
+      }
+      env.push(Math.sqrt(sum / Math.max(1, cnt)));
+    }
+    return { dur: n / sr, fileDur: buf.duration, peaks: peaks, env: env, hop: hop / sr };
+  }
+
+  // sens: 0 (fewer beats) .. 1 (more beats)
+  function detectOnsets(an, sens) {
+    var env = an.env, hop = an.hop, max = 0, i;
+    for (i = 0; i < env.length; i++) if (env[i] > max) max = env[i];
+    if (!max) return [0];
+    var thr = max * (0.62 - 0.5 * sens);
+    var onsets = [], armed = true, peak = 0;
+    for (i = 0; i < env.length; i++) {
+      var v = env[i];
+      if (armed && v >= thr) {
+        var j = i;
+        while (j > 0 && env[j - 1] < env[j] && env[j - 1] > thr * 0.12) j--;
+        var t = j * hop;
+        if (!onsets.length || t - onsets[onsets.length - 1] >= 0.05) onsets.push(Math.round(t * 1000) / 1000);
+        armed = false; peak = v;
+      } else if (!armed) {
+        if (v > peak) peak = v;
+        if (v < Math.max(thr * 0.55, peak * 0.35)) armed = true;
+      }
+    }
+    if (!onsets.length) onsets.push(0);
+    if (onsets[0] <= 0.03) onsets[0] = 0;
+    return onsets;
+  }
+
+  function analysisKey(a) {
+    var k = String(a.path);
+    try { if (nodeFs) { var st = nodeFs.statSync(a.path); k += '|' + st.size + '|' + Math.round(st.mtimeMs); } } catch (e) {}
+    if (a.kind === 'part') k += '|' + a.in + '|' + a.out;
+    return k;
+  }
+
+  var envCache = {}; // asset id -> analysis (envelope kept in memory only)
+  var analyzing = {};
+  function ensureAnalysis(a, force) {
+    if (!fileExists(a.path)) return Promise.resolve();
+    var key = analysisKey(a);
+    var have = a.wave && a.wave.key === key && !a.wave.error && (a.kind !== 'sfx' || a.wave.onsets);
+    if (have && !force) return Promise.resolve();
+    if (analyzing[a.id]) return analyzing[a.id];
+    var p = decode(a.path).then(function (buf) {
+      if (a.kind === 'part') {
+        a.in = clamp(a.in, 0, buf.duration);
+        a.out = clamp(a.out, a.in + 0.05, buf.duration);
+        key = analysisKey(a);
+      }
+      var an = a.kind === 'part' ? analyzeBuffer(buf, a.in, a.out) : analyzeBuffer(buf);
+      envCache[a.id] = an;
+      var sens = a.wave && a.wave.sens != null ? a.wave.sens : 0.5;
+      a.wave = { key: key, dur: an.dur, fileDur: an.fileDur, peaks: an.peaks, sens: sens };
+      if (a.kind === 'sfx') a.wave.onsets = detectOnsets(an, sens);
+    }).catch(function () {
+      a.wave = { key: key, error: true };
+    }).then(function () {
+      delete analyzing[a.id];
+      // If the edit copy was made before the waveform finished, hand it over.
+      if (editing && editing.id === a.id && editing.draft !== a && (!editing.draft.wave || editing.draft.wave.key !== a.wave.key)) {
+        editing.draft.wave = JSON.parse(JSON.stringify(a.wave));
+        if (a.kind === 'part' && editing.draft.path === a.path) { editing.draft.in = a.in; editing.draft.out = a.out; }
+      }
+      if (!(editing && editing.draft === a)) save();
+      refreshCard(a.id);
+    });
+    analyzing[a.id] = p;
+    return p;
+  }
+
+  // Seconds at which to stop so only `beats` beats play. 0 = whole sound.
+  function outForBeats(a, beats) {
+    var on = a.wave && a.wave.onsets;
+    if (!on || !beats || beats >= on.length) return 0;
+    return Math.max(0.02, on[beats] - 0.004);
+  }
+
+  // ---------- State ----------
+  var editing = null;   // { id, draft }
+  var hover = {};       // id -> beats under the pointer / keyboard
+  var seqTracks = 8;
+  var bgmSel = {};       // full BGM id -> { a, b } selected seconds
+  var view = 'sounds';  // 'sounds' or 'settings'
+
+  function assetById(id) { return client().assets.find(function (a) { return a.id === id; }); }
+  function viewAsset(id) { return editing && editing.id === id ? editing.draft : assetById(id); }
+
+  // ---------- Rendering: header ----------
+  function renderClients() {
+    var sel = $('#clientSelect');
+    sel.innerHTML = lib.clients.map(function (c) {
+      return '<option value="' + c.id + '">' + esc(c.name) + '</option>';
+    }).join('');
+    sel.value = client().id;
+  }
+
+  function renderTabs() {
+    var inSettings = view === 'settings';
+    document.querySelectorAll('.tab').forEach(function (t) {
+      var on = !inSettings && t.dataset.kind === lib.activeKind;
+      t.classList.toggle('active', on);
+      t.setAttribute('aria-selected', on);
+    });
+    $('#settingsBtn').classList.toggle('on', inSettings);
+    var isCheck = !inSettings && lib.activeKind === 'check';
+    $('#list').classList.toggle('hidden', inSettings || isCheck);
+    $('#check').classList.toggle('hidden', !isCheck);
+    $('#settings').classList.toggle('hidden', !inSettings);
+    $('#dropzone').classList.toggle('hidden', inSettings || isCheck);
+    $('#captureBtn').classList.toggle('hidden', lib.activeKind !== 'part');
+    $('#dropHint').textContent = lib.activeKind === 'part'
+      ? 'Select a keyframed BGM clip on the timeline, then press Save selected timeline clip'
+      : 'or drag audio files here';
+  }
+
+  function trackLabel(t) { return t < 0 ? 'Auto' : 'A' + (t + 1); }
+  function trackOptions(sel) {
+    var html = '<option value="-1"' + (sel === -1 ? ' selected' : '') + '>Auto (first free)</option>';
+    for (var i = 0; i < 12; i++) html += '<option value="' + i + '"' + (sel === i ? ' selected' : '') + '>A' + (i + 1) + '</option>';
+    return html;
+  }
+  function faderPct(db) { return ((clamp(db, MIN_DB, MAX_DB) - MIN_DB) / (MAX_DB - MIN_DB)) * 100; }
+
+  function faderHtml(db) {
+    var pct = faderPct(db), zero = faderPct(0);
+    return '<div class="fader">' +
+      '<div class="fader-track" tabindex="0" role="slider" aria-label="Volume" aria-valuemin="' + MIN_DB +
+        '" aria-valuemax="' + MAX_DB + '" aria-valuenow="' + db + '">' +
+        '<div class="fader-fill" style="width:' + pct + '%"></div>' +
+        '<div class="fader-zero" style="left:' + zero + '%"></div>' +
+        '<div class="fader-line" style="left:' + pct + '%"></div>' +
+      '</div>' +
+      '<input class="db" data-f="db" type="number" step="0.5" min="' + MIN_DB + '" max="' + MAX_DB + '" value="' + db + '" aria-label="Volume in dB">' +
+    '</div>';
+  }
+
+  // ---------- Rendering: edit drawer ----------
+  function partVolumeHtml(d) {
+    return '<div class="erow"><label>Volume keyframes <span class="cname" data-role="kcount">' + (d.keys.length ? '(' + d.keys.length + ')' : '') + '</span></label>' +
+      '<div class="seg">' +
+        '<button data-act="preset" data-p="flat">Flat</button>' +
+        '<button data-act="preset" data-p="down">High \u2192 low</button>' +
+        '<button data-act="preset" data-p="up">Low \u2192 high</button>' +
+      '</div>' +
+      '<div class="note">Add as many as you like: click the line on the waveform above, drag a point to move it, double-click a point to delete it.</div>' +
+      '<div data-role="krows">' + keyRowsHtml(d) + '</div>' +
+      '</div>';
+  }
+
+  function editHtml(d) {
+    var swatches = LABELS.map(function (l, i) {
+      return '<button class="swatch' + (d.color === i ? ' on' : '') + '" data-act="color" data-i="' + i +
+        '" style="--c:' + l.hex + '" title="' + l.name + '" aria-label="' + l.name + '"></button>';
+    }).join('');
+    var parts = '';
+    if (d.kind === 'part') {
+      parts =
+        '<div class="erow"><label>Section</label><div class="seg">' +
+          TAGS.map(function (t) {
+            return '<button data-act="tag" data-t="' + t.id + '" class="' + (d.tag === t.id ? 'on' : '') + '">' + t.name + '</button>';
+          }).join('') + '</div></div>' +
+        '<div class="erow"><label>Part of the file <span class="cname">' + fmtSec(partLen(d)) +
+          (d.wave && d.wave.fileDur ? ' of ' + fmtSec(d.wave.fileDur) : '') + '</span></label>' +
+          '<div class="inout"><span>From</span><input type="number" step="0.1" min="0" data-f="in" value="' + d.in + '">' +
+          '<span>to</span><input type="number" step="0.1" min="0" data-f="out" value="' + d.out + '"><span>s</span></div></div>' +
+        partVolumeHtml(d);
+    }
+    var vol = d.kind !== 'part' ? '<div class="erow"><label>Volume</label>' + faderHtml(d.db) + '</div>' : '';
+    var beats = d.kind === 'sfx'
+      ? '<div class="erow"><label>Beat detection</label>' +
+          '<div class="sens"><span>Fewer</span><input type="range" data-f="sens" min="0" max="1" step="0.05" value="' +
+          (d.wave && d.wave.sens != null ? d.wave.sens : 0.5) + '" aria-label="Beat detection sensitivity"><span>More</span></div>' +
+          '<div class="note" data-role="beatcount"></div></div>'
+      : '';
+    return '' +
+      '<div class="edit">' +
+        '<div class="erow"><label>Name</label><input data-f="name" value="' + esc(d.name) + '"></div>' +
+        parts + vol +
+        '<div class="erow"><label>Track</label><select data-f="track">' + trackOptions(d.track) + '</select></div>' +
+        '<div class="erow"><label>Clip colour <span class="cname" data-role="cname">' + LABELS[d.color].name + '</span></label><div class="swatches">' + swatches + '</div></div>' +
+        beats +
+        '<div class="erow"><label>File</label><div class="filerow"><span class="file" title="' + esc(d.path) + '"><bdi>' + esc(d.path) + '</bdi></span>' +
+          '<button class="mini" data-act="preview">Listen</button><button class="mini" data-act="relink">Relink</button></div></div>' +
+        '<div class="eactions">' +
+          '<button class="danger" data-act="remove">Remove</button>' +
+          '<span class="spacer"></span>' +
+          '<button data-act="cancel">Cancel</button>' +
+          '<button class="save" data-act="save">Save</button>' +
+        '</div>' +
+      '</div>';
+  }
+
+  // ---------- Rendering: cards ----------
+  function cardHtml(a) {
+    var isEdit = editing && editing.id === a.id;
+    var v = isEdit ? editing.draft : a;
+    var missing = !fileExists(v.path);
+    var col = LABELS[v.color] ? LABELS[v.color].hex : '#888';
+    var dragWave = !isEdit && v.kind !== 'bgm';
+    var body;
+    if (missing) {
+      body = '<div class="missing-row">File not found. <button class="mini" data-act="relink">Relink</button></div>';
+    } else {
+      body = '<div class="wave"' + (dragWave ? ' draggable="true"' : '') + ' tabindex="0" role="button" aria-label="Waveform of ' + esc(v.name) + '. ' +
+          (v.kind === 'sfx' ? 'Arrow keys pick beats, ' : '') + 'Enter places at the playhead.">' +
+          '<canvas></canvas></div>' +
+        '<div class="hint-row"><span class="hint-text" data-role="hint"></span>' +
+          (v.kind === 'bgm' ? '' : '<button class="place" data-act="place">' + (v.kind === 'sfx' ? 'Place all' : 'Place') + '</button>') +
+        '</div>' +
+        (v.kind === 'bgm' && !isEdit
+          ? '<div class="bgm-actions">' +
+              '<button class="mini" data-act="listen">Listen</button>' +
+              '<button class="mini" data-act="clearsel" disabled>Clear</button>' +
+              '<button class="mini" data-act="aspart" disabled title="Keep this section in BGM parts">Save as part</button>' +
+            '</div>' +
+            '<div class="bgm-go">' +
+              '<span class="drag-handle" draggable="true" data-act="drag" title="Drag onto the timeline" role="button" tabindex="0">⠇ Drag to timeline</span>' +
+              '<button class="place" data-act="place">Place</button>' +
+            '</div>'
+          : '');
+    }
+    return '' +
+      '<div class="card ' + v.kind + (missing ? ' missing' : '') + (isEdit ? ' editing' : '') + '" data-id="' + a.id + '" style="--c:' + col + '">' +
+        '<div class="card-top">' +
+          '<span class="dot" data-role="dot" title="' + LABELS[v.color].name + '"></span>' +
+          '<span class="name" data-role="name" title="' + esc(v.name) + '">' + esc(v.name) + '</span>' +
+          '<span class="badge" data-role="vol" title="Saved volume">' + volLabel(v) + '</span>' +
+          '<span class="badge" data-role="track" title="Track">' + trackLabel(v.track) + '</span>' +
+          (isEdit ? '' : '<button class="icon edit-btn" data-act="edit" title="Edit this sound" aria-label="Edit ' + esc(v.name) + '">✎</button>') +
+        '</div>' +
+        body +
+        (isEdit ? editHtml(v) : '') +
+      '</div>';
+  }
+
+  function renderList() {
+    var list = $('#list');
+    var kind = lib.activeKind;
+    if (kind === 'check') return;
+    var assets = client().assets.filter(function (a) { return a.kind === kind; });
+    if (!assets.length) {
+      var how = kind === 'part'
+        ? 'Keyframe a BGM section on the timeline the way you like it, select the clip, then press Save selected timeline clip.'
+        : 'Add sounds below. Set each one’s level, track and colour once and reuse them on every video.';
+      list.innerHTML = '<div class="empty">No ' + KIND_NAMES[kind] + ' for ' + esc(client().name) + ' yet.<br>' + how + '</div>';
+      return;
+    }
+    if (kind === 'part') {
+      list.innerHTML = TAGS.map(function (t) {
+        var group = assets.filter(function (a) { return (editing && editing.id === a.id ? editing.draft.tag : a.tag) === t.id; });
+        if (!group.length) return '';
+        return '<div class="group">' + t.name + '<span>' + group.length + '</span></div>' + group.map(cardHtml).join('');
+      }).join('');
+    } else {
+      list.innerHTML = assets.map(cardHtml).join('');
+    }
+    assets.forEach(function (a) { refreshCard(a.id); ensureAnalysis(a); });
+  }
+
+  function renderAll() {
+    renderClients(); renderTabs();
+    if (view === 'settings') renderSettings();
+    else if (lib.activeKind === 'check') renderCheck();
+    else renderList();
+  }
+
+  function fmtClock(s) {
+    s = Math.max(0, s || 0);
+    var m = Math.floor(s / 60), r = s - m * 60;
+    return m + ':' + (r < 10 ? '0' : '') + r.toFixed(1);
+  }
+  function yOfDb(db, H) { return 4 + ((MAX_DB - clamp(db, MIN_DB, MAX_DB)) / (MAX_DB - MIN_DB)) * (H - 8); }
+  function dbOfY(y, H) { return MAX_DB - clamp((y - 4) / (H - 8), 0, 1) * (MAX_DB - MIN_DB); }
+  function flash(id) {
+    var c = document.querySelector('.card[data-id="' + id + '"]');
+    if (!c) return;
+    c.scrollIntoView({ block: 'nearest' });
+    c.classList.add('flash');
+    setTimeout(function () { c.classList.remove('flash'); }, 1400);
+  }
+
+  // Draws the waveform + updates hint text for one card.
+  function refreshCard(id) {
+    var card = document.querySelector('.card[data-id="' + id + '"]');
+    var a = viewAsset(id);
+    if (!card || !a) return;
+    var isEdit = editing && editing.id === id;
+    var canvas = card.querySelector('canvas');
+    var hint = card.querySelector('[data-role="hint"]');
+    var w = a.wave;
+    var onsets = a.kind === 'sfx' && w && w.onsets;
+    var total = onsets ? onsets.length : 0;
+    var sel = hover[id] || 0;
+    var range = a.kind === 'bgm' ? bgmSel[id] : null;
+    var isPlaying = playing && playing.id === id;
+
+    if (hint) {
+      if (!w || analyzing[a.id]) hint.textContent = 'Reading waveform…';
+      else if (w.error) hint.textContent = 'Can’t draw this file’s waveform. Place still works.';
+      else if (a.kind === 'part' && isEdit) {
+        var k = kf && kf.id === id && kf.idx != null ? a.keys[kf.idx] : null;
+        hint.innerHTML = k
+          ? 'Keyframe <b>' + (kf.idx + 1) + ' of ' + a.keys.length + '</b>: ' + fmtSec(k[0]) + ', ' + fmtDb(k[1])
+          : (a.keys.length ? a.keys.length + ' keyframes · ' : '') + 'click to add · drag to move · double-click to delete';
+      }
+      else if (a.kind === 'bgm') {
+        hint.innerHTML = range
+          ? 'Selected <b>' + fmtClock(range.a) + '–' + fmtClock(range.b) + '</b> (' + fmtSec(range.b - range.a) + ')'
+          : fmtClock(w.dur) + ' · drag across the wave to pick a part';
+      }
+      else if (a.kind === 'part') hint.textContent = fmtSec(partLen(a)) + (a.keys.length ? ' · ' + a.keys.length + ' keyframes' : '') + ' · click to place, or drag to the timeline';
+      else if (isEdit) hint.textContent = total + ' beat' + (total === 1 ? '' : 's');
+      else if (sel && sel < total) hint.innerHTML = 'Click or drag <b>' + sel + ' of ' + total + ' beats</b> (' + fmtSec(outForBeats(a, sel)) + ')';
+      else if (sel) hint.innerHTML = 'Click or drag <b>all ' + total + ' beat' + (total > 1 ? 's' : '') + '</b> (' + fmtSec(w.dur) + ')';
+      else hint.textContent = total + ' beat' + (total === 1 ? '' : 's') + ' · hover to pick how many, then click or drag';
+    }
+    var bc = card.querySelector('[data-role="beatcount"]');
+    if (bc) bc.textContent = total ? 'Found ' + total + ' beat' + (total === 1 ? '' : 's') + ' in this sound.' : '';
+    var kc = card.querySelector('[data-role="kcount"]');
+    if (kc) kc.textContent = a.keys && a.keys.length ? '(' + a.keys.length + ')' : '';
+    var lb = card.querySelector('[data-act="listen"]');
+    if (lb) lb.textContent = isPlaying ? 'Stop' : (range ? 'Listen to part' : 'Listen');
+    var clr = card.querySelector('[data-act="clearsel"]'); if (clr) clr.disabled = !range;
+    var ap = card.querySelector('[data-act="aspart"]'); if (ap) ap.disabled = !range;
+    var pl = card.querySelector('.bgm-go [data-act="place"]'); if (pl) pl.textContent = range ? 'Place part' : 'Place';
+
+    if (!canvas) return;
+    var box = canvas.parentElement.getBoundingClientRect();
+    var dpr = window.devicePixelRatio || 1;
+    var W = Math.max(10, Math.floor(box.width)), H = Math.max(10, Math.floor(box.height));
+    canvas.width = W * dpr; canvas.height = H * dpr;
+    canvas.style.width = W + 'px'; canvas.style.height = H + 'px';
+    var g = canvas.getContext('2d');
+    g.setTransform(dpr, 0, 0, dpr, 0, 0);
+    g.clearRect(0, 0, W, H);
+    if (!w || w.error || !w.peaks) return;
+
+    var col = LABELS[a.color].hex;
+    var dur = w.dur || 1;
+    // Highlighted span, as fractions of the width.
+    var h0 = 0, h1 = 0;
+    if (a.kind === 'sfx' && sel && !isEdit) { h1 = sel >= total ? 1 : outForBeats(a, sel) / dur; }
+    else if (range) { h0 = range.a / dur; h1 = range.b / dur; }
+    else if (a.kind === 'part' && sel && !isEdit) h1 = 1;
+    var hasHi = h1 > h0;
+
+    var mid = H / 2 + (a.kind === 'sfx' ? 5 : 0), amp = (H - (a.kind === 'sfx' ? 14 : 6)) / 2;
+    var n = w.peaks.length, bw = W / n, i;
+    if (hasHi) { g.fillStyle = col; g.globalAlpha = 0.16; g.fillRect(h0 * W, 0, (h1 - h0) * W, H); g.globalAlpha = 1; }
+    var dim = a.kind === 'part';
+    for (i = 0; i < n; i++) {
+      var x = i * bw, f = x / W, hh = Math.max(1, w.peaks[i] * amp);
+      var inHi = hasHi && f >= h0 && f < h1;
+      g.fillStyle = inHi || !hasHi ? col : '#5b5b5b';
+      g.globalAlpha = dim ? (inHi ? 0.75 : 0.45) : (inHi ? 1 : (hasHi ? 0.85 : 0.75));
+      g.fillRect(x, mid - hh, Math.max(1, bw - 0.6), hh * 2);
+    }
+    g.globalAlpha = 1;
+    if (range) {
+      g.fillStyle = '#ffffff';
+      g.fillRect(Math.round(h0 * W), 0, 2, H);
+      g.fillRect(Math.round(h1 * W) - 2, 0, 2, H);
+    }
+
+    if (onsets) {
+      g.font = '600 10px -apple-system, "Segoe UI", sans-serif';
+      g.textBaseline = 'top';
+      onsets.forEach(function (t, k2) {
+        var x2 = Math.round((t / dur) * W) + 0.5;
+        g.fillStyle = 'rgba(255,255,255,.55)'; g.fillRect(x2, 0, 1, H);
+        var label = String(k2 + 1), active = sel && k2 < sel && !isEdit;
+        g.fillStyle = active ? col : '#2a2a2a';
+        g.fillRect(x2, 0, g.measureText(label).width + 6, 12);
+        g.fillStyle = active ? '#141414' : '#cfcfcf';
+        g.fillText(label, x2 + 3, 1);
+      });
+    }
+
+    // BGM part: the saved volume keyframes drawn like Premiere's rubber band.
+    if (a.kind === 'part') {
+      var len = partLen(a) || 1;
+      var keys = a.keys.slice().sort(function (p, q2) { return p[0] - q2[0]; });
+      var pts = keys.length
+        ? keys.map(function (k3) { return [clamp(k3[0] / len, 0, 1) * W, yOfDb(k3[1], H)]; })
+        : [[0, yOfDb(a.db, H)], [W, yOfDb(a.db, H)]];
+      if (isEdit) {
+        g.strokeStyle = 'rgba(255,255,255,.12)'; g.lineWidth = 1;
+        [0, -12, -24, -36].forEach(function (db) {
+          var yy = Math.round(yOfDb(db, H)) + 0.5;
+          g.beginPath(); g.moveTo(0, yy); g.lineTo(W, yy); g.stroke();
+          g.fillStyle = 'rgba(255,255,255,.4)'; g.font = '10px -apple-system, "Segoe UI", sans-serif';
+          g.textBaseline = 'bottom'; g.fillText(db === 0 ? '0 dB' : String(db), 3, yy - 1);
+        });
+      }
+      g.strokeStyle = '#f2f2f2'; g.lineWidth = 1.5; g.beginPath();
+      g.moveTo(0, pts[0][1]);
+      pts.forEach(function (p) { g.lineTo(p[0], p[1]); });
+      g.lineTo(W, pts[pts.length - 1][1]);
+      g.stroke();
+      if (keys.length) {
+        var r0 = isEdit ? 4.5 : 3.2;
+        a.keys.forEach(function (k4, idx) {
+          var px = clamp(clamp(k4[0] / len, 0, 1) * W, r0 + 1, W - r0 - 1), py = yOfDb(k4[1], H);
+          var hot = isEdit && kf && kf.id === id && (kf.idx === idx || kf.hover === idx);
+          g.fillStyle = hot ? col : '#f2f2f2';
+          g.beginPath(); g.arc(px, py, hot ? r0 + 1.5 : r0, 0, Math.PI * 2); g.fill();
+          g.strokeStyle = '#1b1b1b'; g.lineWidth = 1; g.stroke();
+        });
+      }
+    }
+
+    if (isPlaying) {
+      var pt = (playing.audio.currentTime - playing.offset) / dur;
+      if (pt >= 0 && pt <= 1) { g.fillStyle = '#ffffff'; g.fillRect(Math.round(pt * W), 0, 2, H); }
+    }
+  }
+
+  // ---------- Placing ----------
+  var placing = false;
+  function place(a, beats, btn) {
+    if (placing) return;
+    if (!fileExists(a.path)) { setStatus('File missing. Edit the sound and use Relink.', 'err'); return; }
+    var script, what = a.name, range = a.kind === 'bgm' ? bgmSel[a.id] : null;
+    if (a.kind === 'part') {
+      var keys = a.keys.map(function (k) { return Number(k[0]) + ':' + Number(k[1]); }).join(';');
+      script = 'CSK.placePart(' + q(a.path) + ',' + q(client().name) + ',' + Number(a.track) + ',' +
+        Number(a.in) + ',' + Number(a.out) + ',' + q(keys) + ',' + q(a.mode || 'media') + ',' + clipDb(a) + ',' + Number(a.color) + ')';
+    } else if (range) {
+      what = a.name + ' (' + fmtClock(range.a) + '–' + fmtClock(range.b) + ')';
+      script = 'CSK.placePart(' + q(a.path) + ',' + q(client().name) + ',' + Number(a.track) + ',' +
+        range.a + ',' + range.b + ',"","media",' + clipDb(a) + ',' + Number(a.color) + ')';
+    } else {
+      var out = a.kind === 'sfx' ? outForBeats(a, beats) : 0;
+      var total = a.wave && a.wave.onsets ? a.wave.onsets.length : 0;
+      if (a.kind === 'sfx' && out) what = a.name + ' (' + beats + ' of ' + total + ' beats)';
+      script = 'CSK.place(' + q(a.path) + ',' + q(client().name) + ',' + clipDb(a) + ',' +
+        Number(a.track) + ',' + out + ',' + Number(a.color) + ')';
+    }
+    placing = true; if (btn) btn.disabled = true;
+    setStatus('Placing ' + what + '…');
+    host(script).then(function (r) {
+      var p = r.split('|');
+      if (p[0] === 'OK') {
+        var volOk = p[2] === '1';
+        setStatus('Placed ' + what + ' on ' + p[1] + ' at ' + volLabel(a) +
+          (volOk ? '' : '. Volume wasn’t applied, check Effect Controls.'), volOk ? 'ok' : 'err');
+      } else setStatus(p.slice(1).join('|') || 'Premiere didn’t respond.', 'err');
+    }).then(function () { placing = false; if (btn) btn.disabled = false; });
+  }
+
+  // ---------- Edit mode ----------
+  function startEdit(id) {
+    if (editing && editing.id !== id) cancelEdit(true);
+    var a = assetById(id);
+    editing = { id: id, draft: JSON.parse(JSON.stringify(a)) };
+    renderList();
+    var card = document.querySelector('.card.editing');
+    if (card) { card.scrollIntoView({ block: 'nearest' }); var ni = card.querySelector('[data-f="name"]'); if (ni) ni.focus(); }
+  }
+  function cancelEdit(silent) {
+    editing = null; stopPreview();
+    if (!silent) { renderList(); setStatus('No changes saved.'); }
+  }
+  function saveEdit() {
+    var a = assetById(editing.id), d = editing.draft;
+    if (d.kind === 'part') {
+      if (!(d.out > d.in)) { setStatus('The part’s end must be after its start.', 'err'); return; }
+      d.keys = d.keys.map(function (k) { return [clamp(Number(k[0]) || 0, 0, partLen(d)), clamp(Number(k[1]) || 0, MIN_DB, MAX_DB)]; })
+        .sort(function (p, q2) { return p[0] - q2[0]; });
+    }
+    var reanalyze = a.path !== d.path || (d.kind === 'part' && (a.in !== d.in || a.out !== d.out));
+    Object.keys(d).forEach(function (k) { a[k] = d[k]; });
+    a.name = (a.name || '').trim() || baseName(a.path);
+    if (a.kind === 'part' && (a.keys.length || a.db)) delete a.inFile;
+    editing = null; stopPreview(); save(); renderList();
+    (reanalyze ? ensureAnalysis(a, true) : Promise.resolve()).then(function () { afterAssetChange(a); });
+    setStatus('Saved ' + a.name + ': ' + volLabel(a) + ', ' + trackLabel(a.track) + ', ' + LABELS[a.color].name + '.', 'ok');
+  }
+
+  function updateDraftBadges(card) {
+    var d = editing.draft;
+    card.querySelector('[data-role="vol"]').textContent = volLabel(d);
+    card.querySelector('[data-role="track"]').textContent = trackLabel(d.track);
+    card.querySelector('[data-role="name"]').textContent = d.name;
+  }
+
+  function setDraftDb(card, db) {
+    var d = editing.draft;
+    d.db = Math.round(clamp(db, MIN_DB, MAX_DB) * 2) / 2;
+    var pct = faderPct(d.db);
+    card.querySelector('.fader-fill').style.width = pct + '%';
+    card.querySelector('.fader-line').style.left = pct + '%';
+    card.querySelector('.fader-track').setAttribute('aria-valuenow', d.db);
+    var input = card.querySelector('.db');
+    if (document.activeElement !== input) input.value = d.db;
+    updateDraftBadges(card);
+    refreshCard(d.id);
+  }
+
+  function redetect() {
+    var d = editing.draft;
+    var run = function () {
+      var an = envCache[d.id];
+      if (!an || !d.wave) return;
+      d.wave.onsets = detectOnsets(an, d.wave.sens);
+      refreshCard(d.id);
+    };
+    if (envCache[d.id]) run();
+    else decode(d.path).then(function (buf) { envCache[d.id] = analyzeBuffer(buf); run(); }).catch(function () {});
+  }
+
+  // ---------- Preview ----------
+  var playing = null; // { id, audio, offset, to, btn, d }
+  function stopPreview() {
+    if (!playing) return;
+    var p = playing; playing = null;
+    p.audio.pause();
+    if (p.btn && p.btn.dataset.act === 'preview') p.btn.textContent = 'Listen';
+    refreshCard(p.id);
+  }
+  // Plays d from `from` to `to` seconds of the file (to 0 = end), following its saved level.
+  function preview(d, from, to, btn) {
+    if (playing && playing.id === d.id && playing.btn === btn) { stopPreview(); return; }
+    stopPreview();
+    var au = new Audio(fileUrl(d.path));
+    var offset = d.kind === 'part' ? d.in : 0;
+    var p = { id: d.id, audio: au, offset: offset, to: to, btn: btn, d: d };
+    playing = p;
+    function level() {
+      var t = au.currentTime - offset;
+      var db = d.kind === 'part' && d.keys.length ? gainAt(d, t) : d.db;
+      return clamp(Math.pow(10, (db - (d.bakedDb || 0)) / 20), 0, 1);
+    }
+    function tick() {
+      if (playing !== p) return;
+      if (p.to && au.currentTime >= p.to) { stopPreview(); return; }
+      au.volume = level();
+      refreshCard(d.id);
+      requestAnimationFrame(tick);
+    }
+    au.onended = function () { if (playing === p) stopPreview(); };
+    au.addEventListener('loadedmetadata', function () {
+      au.currentTime = from || 0;
+      au.volume = level();
+      au.play().then(function () {
+        if (btn && btn.dataset.act === 'preview') btn.textContent = 'Stop';
+        refreshCard(d.id); tick();
+      }).catch(function () {
+        if (playing === p) stopPreview();
+        setStatus('Can’t play this file here. It can still be placed.', 'err');
+      });
+    });
+    au.onerror = function () { if (playing === p) { stopPreview(); setStatus('Can’t play this file here. It can still be placed.', 'err'); } };
+    refreshCard(d.id);
+  }
+
+  // ---------- Files ----------
+  function pickFiles(multi) {
+    if (window.cep && window.cep.fs && window.cep.fs.showOpenDialogEx) {
+      var r = window.cep.fs.showOpenDialogEx(multi, false, 'Choose sound files', '',
+        ['wav', 'mp3', 'aif', 'aiff', 'm4a', 'aac', 'flac', 'ogg']);
+      return Promise.resolve(r && r.err === 0 ? (r.data || []) : []);
+    }
+    return host('CSK.pickFiles()').then(function (r) {
+      return r.indexOf('OK|') === 0 ? r.slice(3).split('\n').filter(Boolean) : [];
+    });
+  }
+
+  function newAsset(kind, path, extra) {
+    var existing = client().assets.filter(function (a) { return a.kind === 'sfx'; }).length;
+    var a = { id: uid(), name: baseName(path), path: path, kind: kind };
+    if (kind === 'sfx') { a.db = -10; a.track = 1; a.color = DEFAULT_SFX_COLORS[existing % DEFAULT_SFX_COLORS.length]; }
+    else if (kind === 'bgm') { a.db = -22; a.track = 3; a.color = 3; }
+    else { a.db = -18; a.track = 3; a.tag = 'intro'; a.color = tagOf('intro').color; a.in = 0; a.out = 6; a.keys = []; a.mode = 'media'; a.name = baseName(path) + ' part'; }
+    if (extra) Object.keys(extra).forEach(function (k) { a[k] = extra[k]; });
+    return a;
+  }
+
+  function addFiles(paths) {
+    paths = paths.filter(function (p) { return p && AUDIO_EXT.test(p); });
+    if (!paths.length) { setStatus('No audio files found. Supported: wav, mp3, aif, m4a, aac, flac, ogg.', 'err'); return; }
+    var kind = lib.activeKind, added = [];
+    paths.forEach(function (p) { var a = newAsset(kind, p); client().assets.push(a); added.push(a); });
+    save();
+    added.forEach(function (a) { ensureAnalysis(a).then(function () { afterAssetChange(a); }); });
+    if (kind === 'part' && added.length === 1) {
+      startEdit(added[0].id);
+      setStatus('Set which seconds of the file to use and its volume shape, then Save.', 'ok');
+    } else {
+      renderList();
+      setStatus('Added ' + paths.length + ' sound' + (paths.length > 1 ? 's' : '') + '. Press ✎ on a sound to set its level, track and colour.', 'ok');
+    }
+  }
+
+  // Intro if it starts near the beginning of the sequence, Ending if it finishes near the end.
+  function guessTag(c) {
+    var end = Number(c.seqEnd) || 0, st = Number(c.start) || 0, fin = st + (c.outS - c.inS);
+    if (end > 0) {
+      if (st < Math.max(8, end * 0.15)) return 'intro';
+      if (fin > end * 0.85) return 'ending';
+      return 'middle';
+    }
+    return 'intro';
+  }
+
+  function captureFromTimeline() {
+    setStatus('Reading the selected clip…');
+    hostJson('CSK.captureSelected()').then(function (c) {
+      var tag = guessTag(c);
+      var a = newAsset('part', c.path, {
+        name: baseName(c.path) + ' ' + fmtClock(c.inS) + '–' + fmtClock(c.outS),
+        in: c.inS, out: c.outS, keys: c.keys || [], mode: c.mode || 'media', db: c.db,
+        track: c.track >= 0 ? c.track : 3, tag: tag, color: tagOf(tag).color
+      });
+      client().assets.push(a); save();
+      editing = null; view = 'sounds'; lib.activeKind = 'part';
+      renderAll(); flash(a.id);
+      ensureAnalysis(a).then(function () { afterAssetChange(a); });
+      setStatus('Saved ' + fmtSec(c.outS - c.inS) + ' to ' + tagOf(tag).name +
+        (a.keys.length ? ' with ' + a.keys.length + ' keyframes' : '') + '. Press ✎ any time to change it.', 'ok');
+    }).catch(function (e) { setStatus(e.message, 'err'); });
+  }
+
+  // ---------- Events: cards ----------
+  var list = $('#list');
+
+  function beatsAtX(a, wave, clientX) {
+    if (a.kind !== 'sfx') return 1;
+    if (!a.wave || !a.wave.dur || !a.wave.onsets) return 0;
+    var r = wave.getBoundingClientRect();
+    var t = clamp((clientX - r.left) / r.width, 0, 1) * a.wave.dur;
+    var n = 0;
+    a.wave.onsets.forEach(function (o) { if (o <= t + 0.001) n++; });
+    return Math.max(1, n);
+  }
+  function timeAtX(a, wave, clientX) {
+    var r = wave.getBoundingClientRect();
+    return clamp((clientX - r.left) / r.width, 0, 1) * ((a.wave && a.wave.dur) || 0);
+  }
+  function r2(n) { return Math.round(n * 100) / 100; }
+
+  // ----- Keyframe editor (BGM parts, edit mode) -----
+  var kf = null; // { id, idx (being dragged), hover }
+  function kfHit(d, wave, e) {
+    var r = wave.getBoundingClientRect(), len = partLen(d) || 1, best = -1, bestD = 10;
+    d.keys.forEach(function (k, i) {
+      var x = clamp(k[0] / len, 0, 1) * r.width, y = yOfDb(k[1], r.height);
+      var dist = Math.hypot(e.clientX - r.left - x, e.clientY - r.top - y);
+      if (dist < bestD) { bestD = dist; best = i; }
+    });
+    return best;
+  }
+  function kfPoint(d, wave, e) {
+    var r = wave.getBoundingClientRect();
+    return [r2(clamp((e.clientX - r.left) / r.width, 0, 1) * partLen(d)),
+            Math.round(dbOfY(e.clientY - r.top, r.height) * 2) / 2];
+  }
+  function sortKeys(d, k) { d.keys.sort(function (p, q2) { return p[0] - q2[0]; }); return d.keys.indexOf(k); }
+  function keyRowsHtml(d) {
+    var len = partLen(d);
+    if (!d.keys.length) return faderHtml(d.db) + '<button class="mini addk" data-act="kadd">+ Add keyframe</button>';
+    return '<div class="khead"><span>Time from start</span><span>Level</span></div>' +
+      '<div class="krows-scroll">' + d.keys.map(function (k, i) {
+        return '<div class="krow" data-i="' + i + '">' +
+          '<input type="number" step="0.1" min="0" max="' + len.toFixed(2) + '" data-f="kt" value="' + k[0] + '" aria-label="Keyframe ' + (i + 1) + ' time">' +
+          '<span class="unit">s</span>' +
+          '<input type="number" step="0.5" min="' + MIN_DB + '" max="' + MAX_DB + '" data-f="kd" value="' + k[1] + '" aria-label="Keyframe ' + (i + 1) + ' level">' +
+          '<span class="unit">dB</span>' +
+          '<button class="mini x" data-act="kdel" aria-label="Delete keyframe ' + (i + 1) + '">×</button>' +
+        '</div>';
+      }).join('') + '</div>' +
+      '<button class="mini addk" data-act="kadd">+ Add keyframe</button>';
+  }
+  function refreshKeyRows(card) {
+    var box = card.querySelector('[data-role="krows"]');
+    if (box) box.innerHTML = keyRowsHtml(editing.draft);
+    updateDraftBadges(card);
+    refreshCard(editing.id);
+  }
+
+  // ----- Drag to the timeline -----
+  // A WAV with the volume (and BGM-part keyframes) already in it is written to
+  // Documents/ClientSoundKit/Rendered/<client>, then handed to Premiere on drag.
+  var prepared = {}, preparing = {}, internalDrag = null, prepTimer = null;
+  function renderDir() { return nodePath.join(LIB_DIR, 'Rendered', safeName(client().name)); }
+  function hashStr(s) { var h = 0; for (var i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0; return (h >>> 0).toString(36).slice(0, 4); }
+  function clockTag(s) { var m = Math.floor(s / 60); return m + 'm' + (s - m * 60).toFixed(1) + 's'; }
+  function dragSpec(a) {
+    var from = 0, to = 0, label = '';
+    if (a.kind === 'sfx') {
+      var total = a.wave && a.wave.onsets ? a.wave.onsets.length : 0, beats = hover[a.id] || total;
+      to = outForBeats(a, beats) || 0;
+      if (beats && beats < total) label = beats + (beats === 1 ? ' beat' : ' beats');
+    } else if (a.kind === 'part') { from = a.in; to = a.out; }
+    else if (bgmSel[a.id]) { from = bgmSel[a.id].a; to = bgmSel[a.id].b; label = clockTag(from) + '-' + clockTag(to); }
+    var vol = a.kind === 'part' && a.keys.length ? a.keys.map(function (k) { return k[0] + ':' + k[1]; }).join(';') : String(a.db);
+    var key = [a.path, a.kind, from.toFixed(3), to.toFixed(3), vol, a.bakedDb || 0].join('|');
+    if (a.kind === 'part') label = (label ? label + ' ' : '') + hashStr(key);
+    var file = nodePath.join(renderDir(), safeName(a.name) + ' [' + volTag(a) + ']' + (label ? ' ' + label : '') + '.wav');
+    return { key: key, from: from, to: to, label: a.kind === 'part' ? '' : label, file: file };
+  }
+  function prepareDrag(a) {
+    if (!nodeFs || !a.wave || a.wave.error || !fileExists(a.path)) return Promise.resolve(null);
+    var sp = dragSpec(a);
+    if (prepared[sp.key] && nodeFs.existsSync(prepared[sp.key])) return Promise.resolve(prepared[sp.key]);
+    if (preparing[sp.key]) return preparing[sp.key];
+    var p = decode(a.path).then(function (buf) {
+      var r = renderRange(a, buf, sp.from, sp.to);
+      mkdirp(renderDir());
+      nodeFs.writeFileSync(sp.file, new Uint8Array(encodeWav(r.chs, r.sr, r.useFloat)));
+      prepared[sp.key] = sp.file;
+      return sp.file;
+    }).catch(function (e) {
+      setStatus('Couldn’t get ' + a.name + ' ready for dragging: ' + e.message, 'err');
+      return null;
+    }).then(function (f) { delete preparing[sp.key]; return f; });
+    preparing[sp.key] = p;
+    return p;
+  }
+  function schedulePrepare(a) { clearTimeout(prepTimer); prepTimer = setTimeout(function () { prepareDrag(a); }, 80); }
+
+  list.addEventListener('dragstart', function (e) {
+    var src = e.target.closest && e.target.closest('[draggable="true"]');
+    var card = src && src.closest('.card'); if (!card) return;
+    var a = assetById(card.dataset.id);
+    if (!a || (editing && editing.id === a.id)) { e.preventDefault(); return; }
+    if (!nodeFs) { e.preventDefault(); setStatus('Dragging to the timeline works inside Premiere Pro. Click to place instead.', 'err'); return; }
+    var sp = dragSpec(a), file = prepared[sp.key];
+    if (!file) {
+      e.preventDefault(); prepareDrag(a);
+      setStatus('Getting ' + a.name + ' ready. Drag again in a moment.');
+      return;
+    }
+    e.dataTransfer.effectAllowed = 'copy';
+    e.dataTransfer.setData('com.adobe.cep.dnd.file.0', file);
+    internalDrag = { file: file, a: a, label: sp.label };
+    setStatus('Drop it on the timeline. The volume is already in the file.');
+  });
+  list.addEventListener('dragend', function () {
+    var d = internalDrag; internalDrag = null;
+    if (!d) return;
+    var told = false;
+    [400, 1500].forEach(function (ms) {
+      setTimeout(function () {
+        host('CSK.afterDrop(' + q(d.file) + ',' + Number(d.a.color) + ')').then(function (r) {
+          if (!told && r.indexOf('OK|') === 0 && Number(r.slice(3)) > 0) {
+            told = true;
+            setStatus('Dropped ' + d.a.name + (d.label ? ' (' + d.label + ')' : '') + ' at ' + volLabel(d.a) +
+              ', coloured ' + LABELS[d.a.color].name + '.', 'ok');
+          }
+        });
+      }, ms);
+    });
+  });
+
+  // ----- BGM section selection -----
+  var selDrag = null; // { id, t0, x0, moved }
+
+  list.addEventListener('pointerdown', function (e) {
+    // Volume fader (edit mode)
+    var fTrack = e.target.closest('.fader-track');
+    if (fTrack && editing) {
+      var fcard = fTrack.closest('.card');
+      fTrack.setPointerCapture(e.pointerId);
+      var fmove = function (ev) {
+        var r = fTrack.getBoundingClientRect();
+        var db = MIN_DB + clamp((ev.clientX - r.left) / r.width, 0, 1) * (MAX_DB - MIN_DB);
+        if (Math.abs(db) < 0.75) db = 0;
+        setDraftDb(fcard, db);
+      };
+      fmove(e);
+      fTrack.onpointermove = fmove;
+      fTrack.onpointerup = fTrack.onpointercancel = function () { fTrack.onpointermove = null; };
+      return;
+    }
+    var wave = e.target.closest('.wave'); if (!wave || e.button !== 0) return;
+    var card = wave.closest('.card'), id = card.dataset.id, a = viewAsset(id);
+    if (!a || !a.wave || a.wave.error) return;
+
+    if (editing && editing.id === id && a.kind === 'part') {
+      var hit = kfHit(a, wave, e);
+      if (hit < 0) {
+        if (!a.keys.length) { var len = r2(partLen(a)); a.keys = [[0, a.db], [len, a.db]]; }
+        var nk = kfPoint(a, wave, e);
+        a.keys.push(nk);
+        hit = sortKeys(a, nk);
+      }
+      kf = { id: id, idx: hit, hover: hit };
+      wave.setPointerCapture(e.pointerId);
+      updateDraftBadges(card); refreshCard(id);
+      e.preventDefault();
+      return;
+    }
+    if (a.kind === 'bgm' && !(editing && editing.id === id)) {
+      selDrag = { id: id, t0: timeAtX(a, wave, e.clientX), x0: e.clientX, moved: false, prev: bgmSel[id] };
+      wave.setPointerCapture(e.pointerId);
+      e.preventDefault();
+    }
+  });
+
+  list.addEventListener('pointermove', function (e) {
+    var wave = e.target.closest('.wave'); if (!wave) return;
+    var card = wave.closest('.card'), id = card.dataset.id, a = viewAsset(id);
+    if (!a) return;
+    // Keyframe drag / hover
+    if (editing && editing.id === id && a.kind === 'part') {
+      if (kf && kf.id === id && kf.idx != null && (e.buttons & 1)) {
+        var k = a.keys[kf.idx], pt = kfPoint(a, wave, e);
+        var lo = kf.idx > 0 ? a.keys[kf.idx - 1][0] + 0.01 : 0;
+        var hi = kf.idx < a.keys.length - 1 ? a.keys[kf.idx + 1][0] - 0.01 : partLen(a);
+        k[0] = r2(clamp(pt[0], lo, hi)); k[1] = pt[1];
+        updateDraftBadges(card); refreshCard(id);
+      } else {
+        var h = kfHit(a, wave, e);
+        wave.style.cursor = h >= 0 ? 'grab' : 'crosshair';
+        if (!kf || kf.id !== id || kf.hover !== h) { kf = { id: id, idx: null, hover: h }; refreshCard(id); }
+      }
+      return;
+    }
+    // BGM selection
+    if (selDrag && selDrag.id === id) {
+      if (Math.abs(e.clientX - selDrag.x0) > 4) selDrag.moved = true;
+      if (selDrag.moved) {
+        var t = timeAtX(a, wave, e.clientX);
+        bgmSel[id] = { a: Math.min(selDrag.t0, t), b: Math.max(selDrag.t0, t) };
+        refreshCard(id);
+      }
+      return;
+    }
+    if (editing && editing.id === id) return;
+    if (a.kind === 'sfx') {
+      var n = beatsAtX(a, wave, e.clientX);
+      if (hover[id] !== n) { hover[id] = n; refreshCard(id); schedulePrepare(a); }
+    } else if (a.kind === 'part') {
+      if (!hover[id]) { hover[id] = 1; refreshCard(id); }
+      schedulePrepare(a);
+    }
+  });
+
+  list.addEventListener('pointerup', function (e) {
+    if (kf && kf.idx != null) {
+      var card = document.querySelector('.card[data-id="' + kf.id + '"]');
+      kf = { id: kf.id, idx: null, hover: kf.idx };
+      if (card && editing) refreshKeyRows(card);
+      return;
+    }
+    if (selDrag) {
+      var s = selDrag; selDrag = null;
+      var a = assetById(s.id), wave = e.target.closest('.wave');
+      if (!a) return;
+      if (!s.moved) {
+        // A click: listen from here (inside the selection: to its end).
+        var t = wave ? timeAtX(a, wave, e.clientX) : s.t0, r = bgmSel[s.id];
+        preview(a, t, r && t >= r.a && t < r.b ? r.b : 0, null);
+      } else {
+        var sel = bgmSel[s.id];
+        if (sel && sel.b - sel.a < 0.2) delete bgmSel[s.id];
+        refreshCard(s.id);
+        if (bgmSel[s.id]) schedulePrepare(a);
+      }
+    }
+  });
+
+  list.addEventListener('pointerout', function (e) {
+    var wave = e.target.closest('.wave'); if (!wave) return;
+    if (wave.contains(e.relatedTarget)) return;
+    var id = wave.closest('.card').dataset.id;
+    if (kf && kf.id === id && kf.idx == null && kf.hover !== -1) { kf.hover = -1; refreshCard(id); }
+    if (document.activeElement !== wave && !internalDrag && hover[id]) { delete hover[id]; refreshCard(id); }
+  });
+
+  list.addEventListener('pointerover', function (e) {
+    var h = e.target.closest('[data-act="drag"]'); if (!h) return;
+    var a = assetById(h.closest('.card').dataset.id);
+    if (a) prepareDrag(a);
+  });
+
+  list.addEventListener('dblclick', function (e) {
+    var fTrack = e.target.closest('.fader-track');
+    if (fTrack && editing) { setDraftDb(fTrack.closest('.card'), 0); return; }
+    var wave = e.target.closest('.wave'); if (!wave || !editing) return;
+    var card = wave.closest('.card'), d = editing.draft;
+    if (card.dataset.id !== editing.id || d.kind !== 'part') return;
+    var hit = kfHit(d, wave, e);
+    if (hit < 0) return;
+    d.keys.splice(hit, 1);
+    if (d.keys.length === 1) { d.db = d.keys[0][1]; d.keys = []; }
+    kf = { id: d.id, idx: null, hover: -1 };
+    refreshKeyRows(card);
+  });
+
+  function presetKeys(d, p) {
+    var len = r2(partLen(d));
+    if (p === 'flat') { if (d.keys.length) d.db = d.keys[0][1]; d.keys = []; return; }
+    var hi = -10, lo = -20;
+    d.keys = p === 'down' ? [[0, hi], [len, lo]] : [[0, lo], [len, hi]];
+  }
+
+  function saveSelectionAsPart(a) {
+    var r = bgmSel[a.id]; if (!r) return;
+    var p = newAsset('part', a.path, {
+      name: a.name + ' ' + fmtClock(r.a) + '–' + fmtClock(r.b),
+      in: r2(r.a), out: r2(r.b), keys: [], db: a.db, track: a.track, tag: 'middle', color: tagOf('middle').color
+    });
+    client().assets.push(p); save();
+    ensureAnalysis(p).then(function () { afterAssetChange(p); });
+    setStatus('Saved ' + fmtSec(r.b - r.a) + ' of ' + a.name + ' to BGM parts (Middle). Change it there any time.', 'ok');
+  }
+
+  list.addEventListener('click', function (e) {
+    var card = e.target.closest('.card'); if (!card) return;
+    var id = card.dataset.id, a = assetById(id); if (!a) return;
+    var wave = e.target.closest('.wave');
+    if (wave) {
+      if ((editing && editing.id === id) || a.kind === 'bgm') return; // handled by pointer events
+      place(a, beatsAtX(a, wave, e.clientX));
+      return;
+    }
+    var btn = e.target.closest('button, [data-act="drag"]'); if (!btn) return;
+    var act = btn.dataset.act, d = editing && editing.id === id ? editing.draft : null;
+    if (act === 'place') place(a, 0, btn);
+    else if (act === 'drag') setStatus('Press and drag this onto the timeline.');
+    else if (act === 'listen') {
+      if (playing && playing.id === id) { stopPreview(); return; }
+      var r = bgmSel[id];
+      preview(a, r ? r.a : 0, r ? r.b : 0, null);
+    }
+    else if (act === 'clearsel') { delete bgmSel[id]; if (playing && playing.id === id) stopPreview(); refreshCard(id); }
+    else if (act === 'aspart') saveSelectionAsPart(a);
+    else if (act === 'edit') startEdit(id);
+    else if (act === 'cancel') cancelEdit();
+    else if (act === 'save') saveEdit();
+    else if (act === 'color' && d) {
+      d.color = Number(btn.dataset.i);
+      card.style.setProperty('--c', LABELS[d.color].hex);
+      card.querySelectorAll('.swatch').forEach(function (s) { s.classList.toggle('on', s === btn); });
+      card.querySelector('[data-role="cname"]').textContent = LABELS[d.color].name;
+      card.querySelector('[data-role="dot"]').title = LABELS[d.color].name;
+      refreshCard(id);
+    }
+    else if (act === 'tag' && d) {
+      var old = tagOf(d.tag);
+      d.tag = btn.dataset.t;
+      if (d.color === old.color) d.color = tagOf(d.tag).color; // follow the section colour unless customised
+      renderList();
+    }
+    else if (act === 'preset' && d) { presetKeys(d, btn.dataset.p); refreshKeyRows(card); }
+    else if (act === 'kadd' && d) {
+      var len = partLen(d);
+      if (!d.keys.length) d.keys = [[0, d.db]];
+      var last = d.keys[d.keys.length - 1];
+      if (last[0] >= len - 0.05) {
+        // Already at the end: split the biggest gap instead.
+        var gi = 0, gap = -1;
+        for (var i = 1; i < d.keys.length; i++) if (d.keys[i][0] - d.keys[i - 1][0] > gap) { gap = d.keys[i][0] - d.keys[i - 1][0]; gi = i; }
+        if (gap > 0.05) { var mid = [r2((d.keys[gi][0] + d.keys[gi - 1][0]) / 2), Math.round(gainAt(d, (d.keys[gi][0] + d.keys[gi - 1][0]) / 2) * 2) / 2]; d.keys.push(mid); sortKeys(d, mid); }
+      } else {
+        d.keys.push([r2(Math.min(len, last[0] + Math.max(0.5, len / 4))), last[1]]);
+      }
+      refreshKeyRows(card);
+    }
+    else if (act === 'kdel' && d) {
+      d.keys.splice(Number(btn.closest('.krow').dataset.i), 1);
+      if (d.keys.length === 1) { d.db = d.keys[0][1]; d.keys = []; }
+      refreshKeyRows(card);
+    }
+    else if (act === 'preview') { var pd = d || a; preview(pd, pd.kind === 'part' ? pd.in : 0, pd.kind === 'part' ? pd.out : 0, btn); }
+    else if (act === 'relink') {
+      pickFiles(false).then(function (paths) {
+        if (!paths[0]) return;
+        if (d) {
+          d.path = paths[0]; d.wave = null; d.bakedDb = 0; renderList();
+          ensureAnalysis(d, true).then(function () { if (editing) renderList(); });
+        } else {
+          a.path = paths[0]; a.wave = null; a.bakedDb = 0; save(); renderList();
+          ensureAnalysis(a, true).then(function () { afterAssetChange(a); });
+        }
+        setStatus('Relinked to ' + baseName(paths[0]) + (d ? '. Press Save to keep it.' : '.'), 'ok');
+      });
+    }
+    else if (act === 'remove') {
+      if (!window.confirm('Remove “' + a.name + '” from ' + client().name + '? The audio file stays on disk.')) return;
+      client().assets = client().assets.filter(function (x) { return x.id !== id; });
+      removeBaked(a, client());
+      editing = null; save(); renderList();
+      setStatus('Removed ' + a.name + '.' + (libraryOn() ? ' Its WAV was removed from the library folder.' : ''));
+    }
+  });
+
+  list.addEventListener('input', function (e) {
+    if (!editing) return;
+    var el = e.target, f = el.dataset.f; if (!f) return;
+    var card = el.closest('.card'); var d = editing.draft;
+    if (f === 'name') d.name = el.value;
+    else if (f === 'db') { var v = parseFloat(el.value); if (!isNaN(v)) setDraftDb(card, v); return; }
+    else if (f === 'track') d.track = parseInt(el.value, 10);
+    else if (f === 'sens') { if (d.wave) { d.wave.sens = parseFloat(el.value); redetect(); } }
+    else if (f === 'kt' || f === 'kd') {
+      var i = Number(el.closest('.krow').dataset.i), n = parseFloat(el.value);
+      if (!isNaN(n)) { d.keys[i][f === 'kt' ? 0 : 1] = n; refreshCard(d.id); }
+    }
+    updateDraftBadges(card);
+  });
+  list.addEventListener('change', function (e) {
+    if (!editing) return;
+    var el = e.target, f = el.dataset.f, d = editing.draft;
+    if (f === 'db') el.value = d.db;
+    if (f === 'kt') { var k = d.keys[Number(el.closest('.krow').dataset.i)]; sortKeys(d, k); refreshKeyRows(el.closest('.card')); }
+    if (f === 'in' || f === 'out') {
+      var n = Math.max(0, parseFloat(el.value) || 0);
+      var oldLen = partLen(d);
+      d[f] = Math.round(n * 1000) / 1000;
+      if (d.wave && d.wave.fileDur) d[f] = Math.min(d[f], d.wave.fileDur);
+      var newLen = partLen(d);
+      if (oldLen > 0 && newLen > 0 && d.keys.length) {
+        d.keys = d.keys.map(function (k2) { return [r2(k2[0] / oldLen * newLen), k2[1]]; });
+      }
+      ensureAnalysis(d, true).then(function () { if (editing && editing.draft === d) renderList(); });
+    }
+  });
+
+  list.addEventListener('keydown', function (e) {
+    var card = e.target.closest('.card'); if (!card) return;
+    var id = card.dataset.id;
+    var fTrack = e.target.closest('.fader-track');
+    if (fTrack && editing) {
+      var step = e.shiftKey ? 3 : 0.5;
+      if (e.key === 'ArrowRight' || e.key === 'ArrowUp') { setDraftDb(card, editing.draft.db + step); e.preventDefault(); }
+      if (e.key === 'ArrowLeft' || e.key === 'ArrowDown') { setDraftDb(card, editing.draft.db - step); e.preventDefault(); }
+      return;
+    }
+    if (e.key === 'Escape' && editing) { cancelEdit(); return; }
+    var wave = e.target.closest('.wave');
+    if (wave && !(editing && editing.id === id)) {
+      var a = viewAsset(id), total = a.kind === 'sfx' && a.wave && a.wave.onsets ? a.wave.onsets.length : 1;
+      var cur = hover[id] || total;
+      if (a.kind === 'sfx' && (e.key === 'ArrowLeft' || e.key === 'ArrowDown')) { hover[id] = Math.max(1, cur - 1); refreshCard(id); e.preventDefault(); }
+      if (a.kind === 'sfx' && (e.key === 'ArrowRight' || e.key === 'ArrowUp')) { hover[id] = Math.min(total, cur + 1); refreshCard(id); e.preventDefault(); }
+      if (e.key === 'Enter' || e.key === ' ') { place(assetById(id), hover[id] || 0); e.preventDefault(); }
+    }
+  });
+  list.addEventListener('focusin', function (e) {
+    var wave = e.target.closest('.wave'); if (!wave) return;
+    var id = wave.closest('.card').dataset.id, a = viewAsset(id);
+    if (a.kind === 'sfx' && !hover[id]) { hover[id] = a.wave && a.wave.onsets ? a.wave.onsets.length : 1; refreshCard(id); }
+  });
+  list.addEventListener('focusout', function (e) {
+    var wave = e.target.closest('.wave'); if (!wave) return;
+    var id = wave.closest('.card').dataset.id; if (hover[id]) { delete hover[id]; refreshCard(id); }
+  });
+
+  if (window.ResizeObserver) {
+    new ResizeObserver(function () {
+      document.querySelectorAll('.card').forEach(function (c) { refreshCard(c.dataset.id); });
+      if (check.result && check.result.mix) drawMixGraph();
+    }).observe(document.body);
+  }
+
+  // =====================================================================
+  // Check: loudness, frequency bands and the whole mix
+  // =====================================================================
+  var BANDS = [
+    { id: 'low', name: 'below 150 Hz', lo: 20, hi: 150 },
+    { id: 'mid', name: '150 Hz–2 kHz', lo: 150, hi: 2000 },
+    { id: 'pres', name: '2–5 kHz', lo: 2000, hi: 5000 },
+    { id: 'high', name: '5–12 kHz', lo: 5000, hi: 12000 }
+  ];
+  var CHECK_DEFAULTS = { sfxPeak: -6, sfxLoud: -18, bgmLoud: -22, outlier: 6, harsh: -24, piercing: -26, boom: -16, jump: 10, mixLoud: -10, others: true };
+  var check = { running: false, result: null, showIgnored: false };
+
+  function checkSettings() {
+    if (!lib.check) {
+      var sfxT = [], bgmT = [];
+      client().assets.forEach(function (a) {
+        if (a.track < 0) return;
+        var arr = a.kind === 'sfx' ? sfxT : bgmT;
+        if (arr.indexOf(a.track) < 0) arr.push(a.track);
+      });
+      lib.check = { sfx: sfxT.length ? sfxT : [1, 2], bgm: bgmT.length ? bgmT : [3] };
+      lib.check.bgm = lib.check.bgm.filter(function (t) { return lib.check.sfx.indexOf(t) < 0; });
+    }
+    Object.keys(CHECK_DEFAULTS).forEach(function (k) { if (lib.check[k] == null) lib.check[k] = CHECK_DEFAULTS[k]; });
+    return lib.check;
+  }
+
+  function gainAt(c, t) {
+    var k = c.keys;
+    if (!k || !k.length) return c.db;
+    if (t <= k[0][0]) return k[0][1];
+    for (var i = 1; i < k.length; i++) {
+      if (t <= k[i][0]) {
+        var span = k[i][0] - k[i - 1][0] || 1;
+        return k[i - 1][1] + (k[i][1] - k[i - 1][1]) * ((t - k[i - 1][0]) / span);
+      }
+    }
+    return k[k.length - 1][1];
+  }
+
+  // ----- FFT (radix-2, 2048 points) -----
+  var FFT_N = 2048, fftTab = null;
+  function fftSetup() {
+    if (fftTab) return fftTab;
+    var n = FFT_N, bits = Math.round(Math.log(n) / Math.LN2), rev = new Uint32Array(n);
+    for (var i = 0; i < n; i++) { var r = 0, x = i; for (var b = 0; b < bits; b++) { r = (r << 1) | (x & 1); x >>= 1; } rev[i] = r; }
+    var cos = new Float64Array(n / 2), sin = new Float64Array(n / 2);
+    for (i = 0; i < n / 2; i++) { cos[i] = Math.cos(2 * Math.PI * i / n); sin[i] = Math.sin(2 * Math.PI * i / n); }
+    var win = new Float64Array(n), w2 = 0;
+    for (i = 0; i < n; i++) { win[i] = 0.5 - 0.5 * Math.cos(2 * Math.PI * i / (n - 1)); w2 += win[i] * win[i]; }
+    return (fftTab = { rev: rev, cos: cos, sin: sin, win: win, w2: w2 });
+  }
+  function fft(frame, re, im) {
+    var t = fftSetup(), n = FFT_N, i;
+    for (i = 0; i < n; i++) { re[t.rev[i]] = frame[i] * t.win[i]; im[t.rev[i]] = 0; }
+    for (var size = 2; size <= n; size <<= 1) {
+      var half = size >> 1, step = n / size;
+      for (var s = 0; s < n; s += size) {
+        for (var j = 0; j < half; j++) {
+          var k = j * step, wr = t.cos[k], wi = -t.sin[k], a = s + j, b = a + half;
+          var tr = re[b] * wr - im[b] * wi, ti = re[b] * wi + im[b] * wr;
+          re[b] = re[a] - tr; im[b] = im[a] - ti; re[a] += tr; im[a] += ti;
+        }
+      }
+    }
+  }
+
+  // Per 100 ms block of a file: mean square, peak and energy in each frequency band (cached).
+  var profCache = {};
+  function bandProfile(path) {
+    if (profCache[path]) return Promise.resolve(profCache[path]);
+    return decode(path).then(function (buf) {
+      var sr = buf.sampleRate, ch = buf.numberOfChannels, n = buf.length, hop = Math.round(sr * 0.1);
+      var data = [], c; for (c = 0; c < ch; c++) data.push(buf.getChannelData(c));
+      var nb = Math.ceil(n / hop);
+      var ms = new Float32Array(nb), pk = new Float32Array(nb), bands = BANDS.map(function () { return new Float32Array(nb); });
+      var t = fftSetup(), frame = new Float64Array(FFT_N), re = new Float64Array(FFT_N), im = new Float64Array(FFT_N);
+      var bins = BANDS.map(function (b) {
+        return [Math.max(1, Math.round(b.lo * FFT_N / sr)), Math.min(FFT_N / 2, Math.round(b.hi * FFT_N / sr))];
+      });
+      var norm = 2 / (FFT_N * t.w2);
+      for (var bi = 0; bi < nb; bi++) {
+        var s0 = bi * hop, s1 = Math.min(n, s0 + hop), sum = 0, peak = 0, i;
+        for (i = s0; i < s1; i++) {
+          for (c = 0; c < ch; c++) { var x = data[c][i]; sum += x * x; var ax = x < 0 ? -x : x; if (ax > peak) peak = ax; }
+        }
+        ms[bi] = sum / Math.max(1, (s1 - s0) * ch); pk[bi] = peak;
+        var c0 = s0 + ((hop - FFT_N) >> 1);
+        for (i = 0; i < FFT_N; i++) {
+          var idx = c0 + i, v = 0;
+          if (idx >= 0 && idx < n) { for (c = 0; c < ch; c++) v += data[c][idx]; v /= ch; }
+          frame[i] = v;
+        }
+        fft(frame, re, im);
+        for (var k = 0; k < BANDS.length; k++) {
+          var e = 0;
+          for (var q2 = bins[k][0]; q2 < bins[k][1]; q2++) e += re[q2] * re[q2] + im[q2] * im[q2];
+          bands[k][bi] = e * norm;
+        }
+      }
+      return (profCache[path] = { hop: hop / sr, ms: ms, pk: pk, bands: bands });
+    });
+  }
+
+  function dB10(x) { return x > 1e-12 ? 10 * Math.log10(x) : -120; }
+  // Loudest 400 ms window (4 blocks) of a mean-square series, in dB.
+  function maxShortTerm(arr) {
+    var best = -120;
+    for (var i = 0; i < arr.length; i++) {
+      var sum = 0, cnt = 0;
+      for (var j = i; j < Math.min(arr.length, i + 4); j++) { sum += arr[j]; cnt++; }
+      best = Math.max(best, dB10(sum / cnt));
+    }
+    return Math.round(best * 10) / 10;
+  }
+
+  // Peak, loudness and band levels as heard, i.e. with the clip's volume (and keyframes) applied.
+  function measure(c, prof) {
+    var b0 = Math.max(0, Math.floor(c.srcIn / prof.hop)), b1 = Math.min(prof.ms.length, Math.ceil(c.srcOut / prof.hop));
+    var peak = -120, msArr = [], bandArr = BANDS.map(function () { return []; });
+    for (var b = b0; b < b1; b++) {
+      var lin2 = Math.pow(10, gainAt(c, Math.max(0, b * prof.hop - c.srcIn)) / 10);
+      var p = prof.pk[b] * Math.sqrt(lin2);
+      if (p > 0) peak = Math.max(peak, 20 * Math.log10(p));
+      msArr.push(prof.ms[b] * lin2);
+      for (var k = 0; k < BANDS.length; k++) bandArr[k].push(prof.bands[k][b] * lin2);
+    }
+    return { peak: Math.round(peak * 10) / 10, loud: maxShortTerm(msArr), band: bandArr.map(maxShortTerm) };
+  }
+
+  // Sums every clip into one timeline so moments in the overall mix can be checked.
+  function mixAnalysis(items, meta) {
+    var hop = 0.1, n = Math.max(1, Math.ceil((meta.outS - meta.inS) / hop));
+    var ms = new Float64Array(n), bands = BANDS.map(function () { return new Float64Array(n); });
+    var top = new Int32Array(n).fill(-1), topV = new Float64Array(n), topP = new Int32Array(n).fill(-1), topPV = new Float64Array(n);
+    items.forEach(function (c, ci) {
+      var p = c.prof; if (!p) return;
+      var m0 = Math.max(0, Math.floor((c.start - meta.inS) / hop)), m1 = Math.min(n, Math.ceil((c.end - meta.inS) / hop));
+      for (var m = m0; m < m1; m++) {
+        var t = meta.inS + m * hop; if (t < c.start - 1e-6 || t >= c.end) continue;
+        var rel = t - c.start, sb = Math.floor((c.srcIn + rel) / p.hop);
+        if (sb < 0 || sb >= p.ms.length) continue;
+        var lin2 = Math.pow(10, gainAt(c, rel) / 10), v = p.ms[sb] * lin2;
+        ms[m] += v; if (v > topV[m]) { topV[m] = v; top[m] = ci; }
+        for (var k = 0; k < BANDS.length; k++) {
+          var bv = p.bands[k][sb] * lin2; bands[k][m] += bv;
+          if (k === 2 && bv > topPV[m]) { topPV[m] = bv; topP[m] = ci; }
+        }
+      }
+    });
+    function st(arr) {
+      var out = new Float32Array(n);
+      for (var i = 0; i < n; i++) { var s = 0, c2 = 0; for (var j = i; j < Math.min(n, i + 4); j++) { s += arr[j]; c2++; } out[i] = dB10(s / c2); }
+      return out;
+    }
+    return { n: n, hop: hop, L: st(ms), P: st(bands[2]), top: top, topV: topV, topP: topP, topPV: topPV };
+  }
+
+  // A jump only matters once the mix is loud enough to notice.
+  var JUMP_FLOOR = -24;
+  // The clip doing most of the work in the 400 ms window starting at block m.
+  function culprit(mix, m, harsh) {
+    var arrI = harsh ? mix.topP : mix.top, arrV = harsh ? mix.topPV : mix.topV, best = -1, bv = -1, bm = m;
+    for (var j = m; j < Math.min(mix.n, m + 4); j++) if (arrI[j] >= 0 && arrV[j] > bv) { bv = arrV[j]; best = arrI[j]; bm = j; }
+    return { ci: best, m: bm };
+  }
+  function mixEvents(mix, s) {
+    var L = mix.L, P = mix.P, n = mix.n, cands = { jump: [], loud: [], harsh: [] };
+    for (var m = 0; m < n; m++) {
+      if (L[m] > JUMP_FLOOR) {
+        var prev = [];
+        for (var j = Math.max(0, m - 30); j < m - 4; j++) if (L[j] > -70) prev.push(L[j]);
+        if (prev.length >= 8) {
+          prev.sort(function (a, b) { return a - b; });
+          var base = prev[Math.floor(prev.length / 2)];
+          if (L[m] - base > s.jump) cands.jump.push({ m: m, v: L[m], by: L[m] - base });
+        }
+      }
+      if (L[m] > s.mixLoud) cands.loud.push({ m: m, v: L[m] });
+      if (P[m] > s.harsh) cands.harsh.push({ m: m, v: P[m] });
+    }
+    var out = [];
+    Object.keys(cands).forEach(function (kind) {
+      var g = null;
+      cands[kind].forEach(function (c) {
+        if (g && c.m - g.last <= 5) { g.last = c.m; if (c.v > g.best.v) g.best = c; }
+        else { if (g) out.push({ kind: kind, c: g.best }); g = { last: c.m, best: c }; }
+      });
+      if (g) out.push({ kind: kind, c: g.best });
+    });
+    return out;
+  }
+
+  function ignoreKey(meta, c) { return meta.seqId + '|' + c.track + '|' + Math.round(c.start * 100) + '|' + c.path; }
+
+  function evaluate() {
+    var r = check.result, s = checkSettings(), items = r.items, meta = r.meta;
+    var sfx = items.filter(function (it) { return it.role === 'sfx' && !it.unreadable; });
+    var sorted = sfx.map(function (it) { return it.loud; }).sort(function (a, b) { return a - b; });
+    var median = sorted.length ? sorted[Math.floor(sorted.length / 2)] : null;
+    items.forEach(function (it) {
+      it.reasons = []; it.metric = null;
+      if (it.unreadable || it.role === 'other') return;
+      var add = function (text, label, value, limit) { it.reasons.push(text); if (!it.metric) it.metric = { label: label, value: value, limit: limit }; };
+      if (it.role === 'sfx') {
+        if (it.peak > s.sfxPeak) add('Peaks at ' + fmtDb(it.peak) + '. Your limit is ' + fmtDb(s.sfxPeak) + '.', 'Peak', it.peak, s.sfxPeak);
+        if (it.loud > s.sfxLoud) add('Loudness ' + fmtDb(it.loud) + '. Your limit is ' + fmtDb(s.sfxLoud) + '.', 'Loudness', it.loud, s.sfxLoud);
+        if (sorted.length >= 3 && it.loud > median + s.outlier) {
+          add(Math.round(it.loud - median) + ' dB louder than your other SFX here (typical ' + fmtDb(median) + ').', 'Loudness', it.loud, median + s.outlier);
+        }
+        if (it.band[0] > s.boom) add('Heavy low end ' + BANDS[0].name + ' at ' + fmtDb(it.band[0]) + ' (boomy). Your limit is ' + fmtDb(s.boom) + '.', 'Lows', it.band[0], s.boom);
+      } else if (it.loud > s.bgmLoud) {
+        add('Music bed at ' + fmtDb(it.loud) + '. Your limit is ' + fmtDb(s.bgmLoud) + '.', 'Loudness', it.loud, s.bgmLoud);
+      }
+      if (it.band[2] > s.harsh) add('Harsh ' + BANDS[2].name + ' at ' + fmtDb(it.band[2]) + ' (sharp, tiring). Your limit is ' + fmtDb(s.harsh) + '.', '2–5 kHz', it.band[2], s.harsh);
+      if (it.band[3] > s.piercing) add('Piercing highs ' + BANDS[3].name + ' at ' + fmtDb(it.band[3]) + '. Your limit is ' + fmtDb(s.piercing) + '.', '5–12 kHz', it.band[3], s.piercing);
+    });
+
+    r.mix = mixAnalysis(items, meta);
+    r.events = [];
+    mixEvents(r.mix, s).forEach(function (ev) {
+      var who = culprit(r.mix, ev.c.m, ev.kind === 'harsh');
+      var t = meta.inS + who.m * r.mix.hop, c = who.ci >= 0 ? items[who.ci] : null;
+      var text, limit;
+      if (ev.kind === 'jump') { text = 'The whole mix jumps ' + Math.round(ev.c.by) + ' dB above the 3 s before it.'; limit = ev.c.v - ev.c.by + s.jump; }
+      else if (ev.kind === 'loud') { text = 'The whole mix reaches ' + fmtDb(ev.c.v) + '. Your limit is ' + fmtDb(s.mixLoud) + '.'; limit = s.mixLoud; }
+      else { text = 'Harsh ' + BANDS[2].name + ' build-up in the mix: ' + fmtDb(ev.c.v) + '. Your limit is ' + fmtDb(s.harsh) + '.'; limit = s.harsh; }
+      // A clip already listed gets this as one more reason instead of a separate card.
+      if (c && c.reasons && c.reasons.length && c.role !== 'other' && t >= c.start - 0.05 && t <= c.end + 0.05) {
+        // Its own loudness/harshness reasons already cover the mix level; only add the jump.
+        if (ev.kind === 'jump' && c.reasons.indexOf(text) < 0) c.reasons.push(text);
+        return;
+      }
+      r.events.push({
+        kind: ev.kind, t: t, value: ev.c.v, limit: limit, text: text, clip: c,
+        key: meta.seqId + '|mix|' + ev.kind + '|' + Math.round(t * 2)
+      });
+    });
+  }
+
+  function chipsHtml(role, s) {
+    var on = s[role], html = '';
+    for (var i = 0; i < seqTracks; i++) {
+      html += '<button class="chip' + (on.indexOf(i) >= 0 ? ' on ' + role : '') + '" data-act="chip" data-role="' + role +
+        '" data-i="' + i + '" aria-pressed="' + (on.indexOf(i) >= 0) + '">A' + (i + 1) + '</button>';
+    }
+    return html;
+  }
+
+  function limitRow(label, k, s) {
+    return '<div class="lim"><span>' + label + '</span><input type="number" step="0.5" data-k="' + k + '" value="' + s[k] + '"><span>dB</span></div>';
+  }
+
+  function renderCheck() {
+    var s = checkSettings();
+    $('#check').innerHTML = '' +
+      '<div class="ck-setup">' +
+        '<p class="ck-intro">Set In and Out on the timeline, then run the check. It listens to every clip in that range at the volume set on it: loudness, harsh frequencies, and sudden loud beats in the whole mix.</p>' +
+        '<div class="ck-row"><label>SFX tracks</label><div class="chips">' + chipsHtml('sfx', s) + '</div></div>' +
+        '<div class="ck-row"><label>BGM tracks</label><div class="chips">' + chipsHtml('bgm', s) + '</div></div>' +
+        '<label class="set-check"><input type="checkbox" data-act="others"' + (s.others ? ' checked' : '') + '> Include all other tracks (voice, extra music) in the whole mix</label>' +
+        '<details class="limits"><summary>Limits</summary>' +
+          '<div class="lim-group">Each clip</div>' +
+          limitRow('SFX peaks above', 'sfxPeak', s) +
+          limitRow('SFX loudness above', 'sfxLoud', s) +
+          limitRow('SFX louder than the others by', 'outlier', s) +
+          limitRow('BGM loudness above', 'bgmLoud', s) +
+          '<div class="lim-group">Frequencies</div>' +
+          limitRow('Harsh 2–5 kHz above', 'harsh', s) +
+          limitRow('Piercing 5–12 kHz above', 'piercing', s) +
+          limitRow('SFX lows below 150 Hz above', 'boom', s) +
+          '<div class="lim-group">Whole mix</div>' +
+          limitRow('Sudden jump of more than', 'jump', s) +
+          limitRow('Mix loudness above', 'mixLoud', s) +
+        '</details>' +
+        '<button class="run" data-act="run"' + (check.running ? ' disabled' : '') + '>' + (check.running ? 'Checking…' : 'Check In to Out') + '</button>' +
+      '</div>' +
+      '<div id="ckResults">' + resultsHtml() + '</div>';
+    if (check.result && check.result.mix) drawMixGraph();
+  }
+
+  function meterHtml(value, limit) {
+    var pct = faderPct(value), lim = faderPct(limit);
+    return '<div class="meter"><div class="meter-fill' + (value > limit ? ' over' : '') + '" style="width:' + pct + '%"></div>' +
+      '<div class="meter-limit" style="left:' + lim + '%" title="Limit ' + fmtDb(limit) + '"></div></div>';
+  }
+
+  function issueHtml(x, meta) {
+    var isMix = !!x.isMix, ign = !!lib.ignored[x.key];
+    var tc = timecode(isMix ? x.t : x.start, meta.fps);
+    var name = isMix ? 'Whole mix' : x.name;
+    var sub = isMix && x.clip ? '<div class="from">Mostly from ' + esc(x.clip.name) + ' on A' + (x.clip.track + 1) + '</div>' : '';
+    var metric = isMix ? { label: 'Mix', value: x.value, limit: x.limit } : x.metric;
+    var reasons = isMix ? [x.text] : x.reasons;
+    return '<div class="issue ' + (isMix ? 'mix' : x.role) + (ign ? ' ignored' : '') + '" data-k="' + esc(x.key) + '">' +
+      '<div class="issue-top"><span class="tc">' + tc + '</span>' +
+        '<span class="name" title="' + esc(name) + '">' + esc(name) + '</span>' +
+        '<span class="badge">' + (isMix ? 'Mix' : 'A' + (x.track + 1)) + '</span></div>' + sub +
+      (metric ? '<div class="issue-meter">' + meterHtml(metric.value, metric.limit) +
+        '<span class="mv">' + metric.label + ' ' + fmtDb(metric.value) + '</span></div>' : '') +
+      '<ul class="why">' + reasons.map(function (t) { return '<li>' + esc(t) + '</li>'; }).join('') + '</ul>' +
+      '<div class="issue-actions">' +
+        '<button data-act="goto">Go to</button>' +
+        (isMix && !x.clip ? '' : '<button data-act="lower">−3 dB' + (isMix ? ' on that clip' : '') + '</button>') +
+        '<span class="spacer"></span>' +
+        (ign ? '<button class="mini" data-act="unignore">Unignore</button>' : '<button class="mini" data-act="ignore">Ignore</button>') +
+      '</div></div>';
+  }
+
+  function resultsHtml() {
+    var r = check.result;
+    if (!r) return '';
+    if (r.error) return '<div class="ck-empty err">' + esc(r.error) + '</div>';
+    var meta = r.meta;
+    var all = r.items.filter(function (it) { return it.reasons && it.reasons.length; })
+      .concat(r.events.map(function (ev) { ev.isMix = true; return ev; }));
+    all.sort(function (a, b) { return (a.isMix ? a.t : a.start) - (b.isMix ? b.t : b.start); });
+    var open = all.filter(function (x) { return !lib.ignored[x.key]; });
+    var ignored = all.filter(function (x) { return lib.ignored[x.key]; });
+    var range = meta.whole ? 'the whole sequence (no In/Out set)' : timecode(meta.inS, meta.fps) + '–' + timecode(meta.outS, meta.fps);
+    var tracks = {}; r.items.forEach(function (it) { tracks[it.track] = 1; });
+    var unread = r.items.filter(function (it) { return it.unreadable; }).length;
+    var head = '<div class="ck-summary">' +
+      '<b>' + (open.length ? open.length + ' thing' + (open.length > 1 ? 's' : '') + ' to review' : 'Nothing disturbing found') + '</b>' +
+      '<span>Checked ' + r.items.length + ' clip' + (r.items.length === 1 ? '' : 's') + ' on ' + Object.keys(tracks).length + ' track' +
+        (Object.keys(tracks).length === 1 ? '' : 's') + ' in ' + range + '.' + (unread ? ' ' + unread + ' couldn’t be read.' : '') + '</span></div>';
+    var graph = '<div class="mixbox"><canvas id="mixGraph"></canvas>' +
+      '<div class="mix-legend"><span class="lg-line"></span>Whole mix loudness<span class="lg-area"></span>2–5 kHz<span class="lg-mark"></span>Flagged</div>' +
+      '<div class="mix-hint" id="mixHint">Click the graph to move the playhead there.</div></div>';
+    var shown = check.showIgnored ? all : open;
+    var cards = shown.map(function (x) { return issueHtml(x, meta); }).join('');
+    var toggle = ignored.length
+      ? '<button class="mini ck-toggle" data-act="toggleIgnored">' + (check.showIgnored ? 'Hide' : 'Show') + ' ' + ignored.length + ' ignored</button>' : '';
+    var none = !open.length && !check.showIgnored
+      ? '<div class="ck-empty">Every clip and the whole mix are within your limits in this range.</div>' : '';
+    return head + graph + cards + none + toggle;
+  }
+
+  function drawMixGraph() {
+    var cv = document.getElementById('mixGraph'), r = check.result;
+    if (!cv || !r || !r.mix) return;
+    var box = cv.parentElement.getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
+    var W = Math.max(50, Math.floor(box.width - 2)), H = 96;
+    cv.width = W * dpr; cv.height = H * dpr; cv.style.width = W + 'px'; cv.style.height = H + 'px';
+    var g = cv.getContext('2d'); g.setTransform(dpr, 0, 0, dpr, 0, 0);
+    g.fillStyle = '#1b1b1b'; g.fillRect(0, 0, W, H);
+    var mix = r.mix, n = mix.n, TOP = 0, BOT = -60, s = checkSettings();
+    var y = function (db) { return 4 + (TOP - clamp(db, BOT, TOP)) / (TOP - BOT) * (H - 8); };
+    var x = function (m) { return (m / Math.max(1, n - 1)) * W; };
+    g.strokeStyle = 'rgba(255,255,255,.08)'; g.lineWidth = 1;
+    [-12, -24, -36, -48].forEach(function (db) { g.beginPath(); g.moveTo(0, Math.round(y(db)) + 0.5); g.lineTo(W, Math.round(y(db)) + 0.5); g.stroke(); });
+    // 2–5 kHz area
+    g.beginPath(); g.moveTo(0, H);
+    for (var m = 0; m < n; m++) g.lineTo(x(m), y(mix.P[m]));
+    g.lineTo(W, H); g.closePath(); g.fillStyle = 'rgba(243,154,47,.35)'; g.fill();
+    // limit
+    g.setLineDash([3, 3]); g.strokeStyle = 'rgba(229,96,90,.7)';
+    g.beginPath(); g.moveTo(0, Math.round(y(s.mixLoud)) + 0.5); g.lineTo(W, Math.round(y(s.mixLoud)) + 0.5); g.stroke(); g.setLineDash([]);
+    // loudness line
+    g.strokeStyle = '#ececec'; g.lineWidth = 1.3; g.beginPath();
+    for (m = 0; m < n; m++) { if (m) g.lineTo(x(m), y(mix.L[m])); else g.moveTo(x(m), y(mix.L[m])); }
+    g.stroke();
+    // flagged moments
+    var marks = r.items.filter(function (it) { return it.reasons && it.reasons.length; }).map(function (it) { return { t: it.start, key: it.key }; })
+      .concat(r.events.map(function (ev) { return { t: ev.t, key: ev.key }; }));
+    marks.forEach(function (mk) {
+      var xx = Math.round(((mk.t - r.meta.inS) / (r.meta.outS - r.meta.inS)) * W) + 0.5;
+      g.fillStyle = lib.ignored[mk.key] ? 'rgba(255,255,255,.25)' : '#e5605a';
+      g.fillRect(xx - 0.5, 0, 1.5, H);
+      g.beginPath(); g.moveTo(xx - 4, 0); g.lineTo(xx + 4, 0); g.lineTo(xx, 6); g.closePath(); g.fill();
+    });
+    g.fillStyle = 'rgba(255,255,255,.45)'; g.font = '10px -apple-system, "Segoe UI", sans-serif'; g.textBaseline = 'bottom';
+    g.fillText(timecode(r.meta.inS, r.meta.fps), 3, H - 2);
+    var endTc = timecode(r.meta.outS, r.meta.fps); g.fillText(endTc, W - g.measureText(endTc).width - 3, H - 2);
+  }
+
+  function runCheck() {
+    var s = checkSettings();
+    if (!s.sfx.length && !s.bgm.length && !s.others) { setStatus('Pick at least one track to check.', 'err'); return; }
+    check.running = true; check.result = null; renderCheck();
+    setStatus('Reading clips between In and Out…');
+    hostJson('CSK.scan(' + q(s.sfx.join(',')) + ',' + q(s.bgm.join(',')) + ',' + (s.others ? 'true' : 'false') + ')').then(function (meta) {
+      seqTracks = Math.max(1, meta.tracks || seqTracks);
+      var items = meta.clips.map(function (c) { c.key = ignoreKey(meta, c); return c; });
+      var paths = []; items.forEach(function (c) { if (paths.indexOf(c.path) < 0) paths.push(c.path); });
+      var i = 0;
+      function next() {
+        if (i >= paths.length) return Promise.resolve();
+        var p = paths[i++];
+        setStatus('Listening to file ' + i + ' of ' + paths.length + ': ' + baseName(p) + '…');
+        return bandProfile(p).catch(function () {}).then(next);
+      }
+      return next().then(function () {
+        items.forEach(function (c) {
+          c.prof = profCache[c.path];
+          if (!c.prof) { c.unreadable = true; return; }
+          var m = measure(c, c.prof); c.peak = m.peak; c.loud = m.loud; c.band = m.band;
+        });
+        check.result = { meta: meta, items: items };
+        evaluate();
+        var n = openCount();
+        setStatus(items.length ? (n ? n + ' thing' + (n > 1 ? 's' : '') + ' to review.' : 'All ' + items.length + ' clips and the whole mix are within your limits.')
+          : 'No clips on those tracks between In and Out.', n ? 'err' : 'ok');
+      });
+    }).catch(function (e) {
+      check.result = { error: e.message }; setStatus(e.message, 'err');
+    }).then(function () { check.running = false; renderCheck(); });
+  }
+
+  function openCount() {
+    var r = check.result; if (!r || !r.items) return 0;
+    return r.items.filter(function (it) { return it.reasons && it.reasons.length && !lib.ignored[it.key]; }).length +
+      r.events.filter(function (ev) { return !lib.ignored[ev.key]; }).length;
+  }
+
+  function findIssue(key) {
+    var r = check.result; if (!r) return null;
+    return r.items.find(function (x) { return x.key === key; }) || r.events.find(function (x) { return x.key === key; });
+  }
+
+  var ckBox = $('#check');
+  ckBox.addEventListener('click', function (e) {
+    var cv = e.target.closest('#mixGraph');
+    if (cv && check.result) {
+      var rect = cv.getBoundingClientRect(), meta = check.result.meta;
+      var t = meta.inS + clamp((e.clientX - rect.left) / rect.width, 0, 1) * (meta.outS - meta.inS);
+      host('CSK.gotoTime(' + t + ')').then(function () { setStatus('Playhead at ' + timecode(t, meta.fps) + '.', 'ok'); });
+      return;
+    }
+    var btn = e.target.closest('button, input[data-act]'); if (!btn) return;
+    var act = btn.dataset.act, s = checkSettings();
+    if (act === 'run') { runCheck(); return; }
+    if (act === 'others') { s.others = btn.checked; save(); return; }
+    if (act === 'chip') {
+      var role = btn.dataset.role, other = role === 'sfx' ? 'bgm' : 'sfx', tr = Number(btn.dataset.i);
+      var arr = s[role], at = arr.indexOf(tr);
+      if (at >= 0) arr.splice(at, 1); else { arr.push(tr); var o = s[other].indexOf(tr); if (o >= 0) s[other].splice(o, 1); }
+      save(); renderCheck(); return;
+    }
+    if (act === 'toggleIgnored') { check.showIgnored = !check.showIgnored; renderCheck(); return; }
+    var card = btn.closest('.issue'); if (!card || !check.result) return;
+    var x = findIssue(card.dataset.k); if (!x) return;
+    var fps = check.result.meta.fps, clip = x.isMix ? x.clip : x, t = x.isMix ? x.t : x.start;
+    var tc = timecode(t, fps);
+    if (act === 'goto') {
+      var go = clip ? host('CSK.gotoClip(' + clip.track + ',' + clip.start + ')') : Promise.resolve('OK|0');
+      go.then(function (r1) {
+        return (x.isMix ? host('CSK.gotoTime(' + t + ')') : Promise.resolve(r1)).then(function (r2b) {
+          if (r2b.indexOf('OK|') !== 0) { setStatus(r2b.split('|').slice(1).join('|'), 'err'); return; }
+          setStatus('Playhead at ' + tc + (clip && r1 === 'OK|1' ? ', ' + clip.name + ' selected on A' + (clip.track + 1) + '.' : '.'), 'ok');
+        });
+      });
+    } else if (act === 'lower' && clip) {
+      btn.disabled = true;
+      hostJson('CSK.adjustClip(' + clip.track + ',' + clip.start + ',-3)').then(function (v) {
+        clip.db = v.db; clip.keys = v.keys;
+        var m = measure(clip, clip.prof); clip.peak = m.peak; clip.loud = m.loud; clip.band = m.band;
+        evaluate(); renderCheck();
+        var still = findIssue(card.dataset.k);
+        var left = still && (still.isMix || (still.reasons && still.reasons.length));
+        setStatus('Lowered ' + clip.name + ' by 3 dB' + (left ? '. Still above your limits here.' : '. Now within your limits.'), left ? 'err' : 'ok');
+      }).catch(function (e2) { setStatus(e2.message, 'err'); btn.disabled = false; });
+    } else if (act === 'ignore') {
+      lib.ignored[x.key] = Date.now(); save(); renderCheck();
+      setStatus('Ignored ' + (x.isMix ? 'the mix moment' : x.name) + ' at ' + tc + '. It won’t be flagged again in this sequence.');
+    } else if (act === 'unignore') {
+      delete lib.ignored[x.key]; save(); renderCheck();
+      setStatus('Unignored ' + (x.isMix ? 'the mix moment' : x.name) + '.');
+    }
+  });
+  ckBox.addEventListener('mousemove', function (e) {
+    var cv = e.target.closest('#mixGraph'), hint = document.getElementById('mixHint');
+    if (!cv || !hint || !check.result || !check.result.mix) return;
+    var rect = cv.getBoundingClientRect(), r = check.result, f = clamp((e.clientX - rect.left) / rect.width, 0, 1);
+    var m = Math.min(r.mix.n - 1, Math.round(f * (r.mix.n - 1)));
+    hint.textContent = timecode(r.meta.inS + f * (r.meta.outS - r.meta.inS), r.meta.fps) + ' · mix ' + fmtDb(r.mix.L[m]) + ' · 2–5 kHz ' + fmtDb(r.mix.P[m]);
+  });
+  ckBox.addEventListener('change', function (e) {
+    var k = e.target.dataset.k; if (!k) return;
+    var v = parseFloat(e.target.value);
+    if (isNaN(v)) { e.target.value = checkSettings()[k]; return; }
+    checkSettings()[k] = v; save();
+    if (check.result && check.result.items) { evaluate(); $('#ckResults').innerHTML = resultsHtml(); drawMixGraph(); }
+  });
+
+  // =====================================================================
+  // Library folder: client-wise WAVs with the volume baked in + client.json
+  // =====================================================================
+  var FOLDERS = { sfx: 'SFX', part: 'BGM parts', bgm: 'Full BGM' };
+  function settings() {
+    if (!lib.settings) lib.settings = { root: '', autoSync: true };
+    return lib.settings;
+  }
+  function safeName(s) { return String(s || 'Untitled').replace(/[\\/:*?"<>|]+/g, '-').replace(/\s+/g, ' ').trim().slice(0, 80) || 'Untitled'; }
+  function dbTag(db) { var n = Math.round(db * 10) / 10; return (n > 0 ? '+' : '') + n + 'dB'; }
+  function clientDir(c) { return nodePath.join(settings().root, safeName(c.name)); }
+  function libraryOn() { return !!(nodeFs && settings().root); }
+  function inside(dir, p) { return p && nodePath.resolve(p).toLowerCase().indexOf(nodePath.resolve(dir).toLowerCase()) === 0; }
+  function mkdirp(d) { if (!nodeFs.existsSync(d)) nodeFs.mkdirSync(d, { recursive: true }); }
+
+  // Gain already in the source file (for sounds imported from a shared folder).
+  function clipDb(a) { return Number(a.db) - (a.bakedDb || 0); }
+
+  function encodeWav(chs, sr, useFloat) {
+    var nCh = chs.length, n = chs[0].length, bps = useFloat ? 4 : 3, block = nCh * bps, dataLen = n * block;
+    var fmtLen = useFloat ? 18 : 16, factLen = useFloat ? 12 : 0;
+    var total = 12 + 8 + fmtLen + factLen + 8 + dataLen;
+    var ab = new ArrayBuffer(total), v = new DataView(ab), o = 0;
+    function str(s) { for (var i = 0; i < s.length; i++) v.setUint8(o++, s.charCodeAt(i)); }
+    function u16(x) { v.setUint16(o, x, true); o += 2; }
+    function u32(x) { v.setUint32(o, x, true); o += 4; }
+    str('RIFF'); u32(total - 8); str('WAVE');
+    str('fmt '); u32(fmtLen); u16(useFloat ? 3 : 1); u16(nCh); u32(sr); u32(sr * block); u16(block); u16(bps * 8);
+    if (useFloat) { u16(0); str('fact'); u32(4); u32(n); }
+    str('data'); u32(dataLen);
+    for (var i = 0; i < n; i++) {
+      for (var c = 0; c < nCh; c++) {
+        var x = chs[c][i];
+        if (useFloat) { v.setFloat32(o, x, true); o += 4; }
+        else {
+          var s = Math.round(Math.max(-1, Math.min(1, x)) * 8388607);
+          v.setUint8(o, s & 255); v.setUint8(o + 1, (s >> 8) & 255); v.setUint8(o + 2, (s >> 16) & 255); o += 3;
+        }
+      }
+    }
+    return ab;
+  }
+
+  // Applies the sound's level (or BGM-part keyframes) to the audio, ready to drop in at 0 dB.
+  function renderBaked(a, buf) {
+    return renderRange(a, buf, a.kind === 'part' ? a.in : 0, a.kind === 'part' ? a.out : 0);
+  }
+
+
+  function bakedFileName(a) { return safeName(a.name) + ' [' + volTag(a) + '].wav'; }
+
+
+  var bakeChain = Promise.resolve();
+  function bakeAsset(a, c) {
+    if (!libraryOn() || !fileExists(a.path)) return Promise.resolve();
+    bakeChain = bakeChain.then(function () {
+      return decode(a.path).then(function (buf) {
+        var dir = nodePath.join(clientDir(c), FOLDERS[a.kind]);
+        mkdirp(dir);
+        var dest = nodePath.join(dir, bakedFileName(a));
+        // Don't overwrite another sound's file that happens to share the name.
+        var taken = c.assets.some(function (o) { return o !== a && o.exportFile && nodePath.resolve(o.exportFile) === nodePath.resolve(dest); });
+        if (taken) dest = dest.replace(/\.wav$/, ' (' + a.id.slice(-4) + ').wav');
+        var r = renderBaked(a, buf);
+        nodeFs.writeFileSync(dest, new Uint8Array(encodeWav(r.chs, r.sr, r.useFloat)));
+        var old = a.exportFile;
+        if (old && nodePath.resolve(old) !== nodePath.resolve(dest) && nodePath.resolve(old) !== nodePath.resolve(a.path) &&
+            inside(settings().root, old) && nodeFs.existsSync(old)) {
+          try { nodeFs.unlinkSync(old); } catch (e) {}
+        }
+        a.exportFile = dest;
+      });
+    }).catch(function (e) {
+      setStatus('Couldn’t save ' + a.name + ' to the library folder: ' + e.message, 'err');
+    }).then(function () { writeClientJson(c); save(); });
+    return bakeChain;
+  }
+
+  function removeBaked(a, c) {
+    if (!libraryOn()) return;
+    if (a.exportFile && nodePath.resolve(a.exportFile) !== nodePath.resolve(a.path) && inside(settings().root, a.exportFile)) {
+      try { if (nodeFs.existsSync(a.exportFile)) nodeFs.unlinkSync(a.exportFile); } catch (e) {}
+    }
+    writeClientJson(c);
+  }
+
+  function writeClientJson(c) {
+    if (!libraryOn()) return;
+    var dir = clientDir(c);
+    try {
+      mkdirp(dir);
+      var data = {
+        cskClientFolder: 1, client: c.name, savedAt: new Date().toISOString(),
+        note: 'Every WAV here already includes the volume listed. Drop them in at 0 dB. Folder made by Client Sound Kit for Premiere Pro.',
+        sounds: c.assets.filter(function (a) { return a.exportFile; }).map(function (a) {
+          var o = {
+            name: a.name, type: a.kind, file: nodePath.relative(dir, a.exportFile).replace(/\\/g, '/'),
+            track: trackLabel(a.track), trackIndex: a.track, color: LABELS[a.color].name, colorIndex: a.color
+          };
+          if (a.kind === 'part') { o.section = a.tag; o.lengthSec = Math.round(partLen(a) * 1000) / 1000; o.keyframes = a.keys; o.volumeDb = a.keys.length ? null : a.db; }
+          else o.volumeDb = a.db;
+          if (a.kind === 'sfx' && a.wave && a.wave.onsets) { o.beats = a.wave.onsets; o.beatSensitivity = a.wave.sens; }
+          return o;
+        })
+      };
+      nodeFs.writeFileSync(nodePath.join(dir, 'client.json'), JSON.stringify(data, null, 2), 'utf8');
+    } catch (e) { setStatus('Couldn’t write client.json: ' + e.message, 'err'); }
+  }
+
+  function syncClient(c) {
+    var jobs = c.assets.map(function (a) { return bakeAsset(a, c); });
+    return Promise.all(jobs).then(function () { writeClientJson(c); });
+  }
+
+  function afterAssetChange(a) { if (libraryOn() && settings().autoSync) bakeAsset(a, client()); }
+
+  function importClientFolder() {
+    if (!nodeFs || !window.cep) { setStatus('Import works inside Premiere Pro.', 'err'); return; }
+    var r = window.cep.fs.showOpenDialogEx(false, true, 'Choose a client folder (with client.json)', settings().root || '', []);
+    var dir = r && r.data && r.data[0];
+    if (!dir) return;
+    importFromDir(dir);
+  }
+
+  function importFromDir(dir) {
+    try {
+      var data = JSON.parse(nodeFs.readFileSync(nodePath.join(dir, 'client.json'), 'utf8'));
+      if (!data || !Array.isArray(data.sounds)) throw new Error('client.json isn’t from Client Sound Kit');
+      var name = data.client || nodePath.basename(dir);
+      if (lib.clients.some(function (c) { return c.name === name; })) name += ' (shared)';
+      var c = { id: uid(), name: name, assets: [] };
+      data.sounds.forEach(function (s) {
+        var a = {
+          id: uid(), name: s.name, kind: s.type, path: nodePath.join(dir, s.file),
+          track: s.trackIndex != null ? s.trackIndex : 1, color: s.colorIndex != null ? s.colorIndex : 5
+        };
+        if (s.type === 'part') {
+          // The fade is already in the file: place it flat, keep the shape as a label.
+          a.tag = s.section || 'intro'; a.in = 0; a.out = s.lengthSec || 6; a.keys = []; a.mode = 'media';
+          a.db = 0; a.bakedDb = 0;
+          if (s.keyframes && s.keyframes.length) a.inFile = volLabel({ kind: 'part', keys: s.keyframes });
+        } else {
+          a.db = s.volumeDb != null ? s.volumeDb : 0; a.bakedDb = a.db;
+          if (s.beats) a.wave = { sens: s.beatSensitivity != null ? s.beatSensitivity : 0.5 };
+        }
+        c.assets.push(a);
+      });
+      lib.clients.push(c); lib.activeClient = c.id;
+      if (!['sfx', 'part', 'bgm'].includes(lib.activeKind)) lib.activeKind = 'sfx';
+      save(); renderAll();
+      setStatus('Imported ' + name + ' with ' + c.assets.length + ' sounds. Levels are already in the files.', 'ok');
+    } catch (e) { setStatus('Couldn’t import that folder: ' + e.message, 'err'); }
+  }
+
+  function volTag(a) {
+    if (a.kind === 'part' && a.keys.length > 1) return dbTag(a.keys[0][1]).replace('dB', '') + ' to ' + dbTag(a.keys[a.keys.length - 1][1]);
+    if (a.kind === 'part' && a.keys.length === 1) return dbTag(a.keys[0][1]);
+    return dbTag(a.db);
+  }
+
+  // [from, to) seconds of the file with the sound's level baked in (to 0 = end of file).
+  function renderRange(a, buf, from, to) {
+    var sr = buf.sampleRate, nCh = buf.numberOfChannels;
+    var s0 = clamp(Math.floor(from * sr), 0, buf.length - 1);
+    var s1 = clamp(to > from ? Math.floor(to * sr) : buf.length, s0 + 1, buf.length);
+    var n = s1 - s0, chs = [], peak = 0, BLK = 64, base = a.bakedDb || 0;
+    var rel0 = from - (a.kind === 'part' ? a.in : 0);
+    for (var c = 0; c < nCh; c++) chs.push(new Float32Array(n));
+    for (var b = 0; b < n; b += BLK) {
+      var g = (a.kind === 'part' ? gainAt(a, rel0 + b / sr) : Number(a.db)) - base;
+      var lin = Math.pow(10, g / 20), e = Math.min(n, b + BLK);
+      for (c = 0; c < nCh; c++) {
+        var src = buf.getChannelData(c), dst = chs[c];
+        for (var i = b; i < e; i++) { var x = src[s0 + i] * lin; dst[i] = x; var ax = x < 0 ? -x : x; if (ax > peak) peak = ax; }
+      }
+    }
+    return { chs: chs, sr: sr, useFloat: peak > 0.999 };
+  }
+
+  // ---------- Settings view ----------
+  var syncing = false;
+  function openSettings(on) {
+    editing = null; stopPreview();
+    view = on ? 'settings' : 'sounds';
+    renderAll();
+  }
+  function openPath(p) {
+    try {
+      if (!nodeFs.existsSync(p)) mkdirp(p);
+      window.require('child_process').exec((process.platform === 'win32' ? 'explorer "' : 'open "') + p + '"');
+    } catch (err) { setStatus(p); }
+  }
+
+  function renderSettings() {
+    var s = settings(), c = client();
+    var where = s.root ? esc(s.root) : 'Not set';
+    var example = esc(safeName(c.name)) + '/SFX, BGM parts, Full BGM';
+    $('#settings').innerHTML = '' +
+      '<div class="set">' +
+        '<div class="set-head"><b>Library folder</b><button class="mini" data-act="close">Done</button></div>' +
+        '<div class="set-path' + (s.root ? '' : ' empty') + '"><bdi>' + where + '</bdi></div>' +
+        '<div class="set-actions">' +
+          '<button class="run" data-act="choose">' + (s.root ? 'Change folder' : 'Choose folder') + '</button>' +
+          (s.root ? '<button data-act="open">Open</button>' : '') +
+        '</div>' +
+        '<p class="set-note">Each client gets its own folder: <b>' + example + '</b>. Sounds are saved as WAV files with your volume already in them, so anyone can drop them in without touching the level. A <b>client.json</b> keeps tracks, colours, beats and keyframes.</p>' +
+        '<label class="set-check"><input type="checkbox" data-act="auto"' + (s.autoSync ? ' checked' : '') + '> Update the folder whenever I add or change a sound</label>' +
+        (s.root ? '<button class="wide" data-act="syncAll"' + (syncing ? ' disabled' : '') + '>' + (syncing ? 'Saving…' : 'Save all clients to the folder now') + '</button>' : '') +
+      '</div>' +
+      '<div class="set">' +
+        '<b>Clients</b>' +
+        '<p class="set-note">To share a client, send its folder from the library. The other person uses Import client folder to get the whole kit with tracks and colours.</p>' +
+        '<div class="set-grid">' +
+          '<button data-act="importFolder">Import client folder…</button>' +
+          '<button data-act="duplicate">Duplicate ' + esc(c.name) + '</button>' +
+          '<button data-act="export">Export client file…</button>' +
+          '<button data-act="import">Import client file…</button>' +
+        '</div>' +
+      '</div>' +
+      '<div class="set">' +
+        '<b>Dragging to the timeline</b>' +
+        '<p class="set-note">Sounds you drag onto the timeline are saved with their volume in them here. Keep this folder, because your projects use these files.</p>' +
+        '<div class="set-path"><bdi>' + esc(nodePath ? nodePath.join(LIB_DIR, 'Rendered') : 'Documents/ClientSoundKit/Rendered') + '</bdi></div>' +
+        '<button class="wide" data-act="openRendered">Open folder</button>' +
+      '</div>';
+  }
+
+  $('#settings').addEventListener('click', function (e) {
+    var el = e.target.closest('[data-act]'); if (!el) return;
+    var act = el.dataset.act, s = settings(), c = client();
+    if (act === 'close') openSettings(false);
+    else if (act === 'choose') {
+      if (!nodeFs || !window.cep) { setStatus('Choosing a folder works inside Premiere Pro.', 'err'); return; }
+      var r = window.cep.fs.showOpenDialogEx(false, true, 'Choose the library folder', s.root || '', []);
+      var dir = r && r.data && r.data[0];
+      if (!dir) return;
+      s.root = dir; save(); renderSettings();
+      setStatus('Library folder set. Saving your clients there…');
+      runSyncAll();
+    }
+    else if (act === 'open') openPath(s.root);
+    else if (act === 'openRendered') { if (nodeFs) openPath(nodePath.join(LIB_DIR, 'Rendered')); }
+    else if (act === 'auto') { s.autoSync = el.checked; save(); }
+    else if (act === 'syncAll') runSyncAll();
+    else if (act === 'importFolder') importClientFolder();
+    else if (act === 'duplicate') {
+      var copy = JSON.parse(JSON.stringify(c));
+      copy.id = uid(); copy.name = c.name + ' copy';
+      copy.assets.forEach(function (a) { a.id = uid(); delete a.exportFile; });
+      lib.clients.push(copy); lib.activeClient = copy.id; save(); renderClients(); renderSettings();
+      if (libraryOn() && s.autoSync) syncClient(copy);
+      setStatus('Duplicated as ' + copy.name + '.', 'ok');
+    }
+    else if (act === 'export') {
+      if (!nodeFs || !window.cep) { setStatus('Export works inside Premiere Pro.', 'err'); return; }
+      var sv = window.cep.fs.showSaveDialogEx('Export client', LIB_DIR, ['json'], c.name.replace(/[^\w\- ]+/g, '') + '.csk.json');
+      if (sv && sv.data) {
+        nodeFs.writeFileSync(sv.data, JSON.stringify({ cskClient: 4, client: c }, null, 2), 'utf8');
+        setStatus('Exported ' + c.name + '.', 'ok');
+      }
+    }
+    else if (act === 'import') {
+      if (!nodeFs || !window.cep) { setStatus('Import works inside Premiere Pro.', 'err'); return; }
+      var o = window.cep.fs.showOpenDialogEx(false, false, 'Import client', LIB_DIR, ['json']);
+      if (o && o.data && o.data[0]) {
+        try {
+          var data = JSON.parse(nodeFs.readFileSync(o.data[0], 'utf8'));
+          var imp = data.client;
+          if (!imp || !Array.isArray(imp.assets)) throw new Error('not a Client Sound Kit file');
+          imp.id = uid(); imp.assets.forEach(function (a) { a.id = uid(); delete a.exportFile; });
+          lib.clients.push(imp); migrate(lib); lib.activeClient = imp.id; save(); renderClients(); renderSettings();
+          setStatus('Imported ' + imp.name + '. Relink any sounds marked missing.', 'ok');
+        } catch (err) { setStatus('Couldn’t import: ' + err.message, 'err'); }
+      }
+    }
+  });
+
+  function runSyncAll() {
+    if (!libraryOn()) return Promise.resolve();
+    syncing = true; if (view === 'settings') renderSettings();
+    var n = lib.clients.reduce(function (t, c) { return t + c.assets.length; }, 0);
+    setStatus('Saving ' + n + ' sounds to the library folder…');
+    var chain = Promise.resolve();
+    lib.clients.forEach(function (c) { chain = chain.then(function () { return syncClient(c); }); });
+    return chain.then(function () {
+      syncing = false; if (view === 'settings') renderSettings();
+      setStatus('Saved ' + n + ' sounds for ' + lib.clients.length + ' client' + (lib.clients.length > 1 ? 's' : '') + ' to the library folder.', 'ok');
+    });
+  }
+
+  // ---------- Events: header ----------
+  $('#clientSelect').addEventListener('change', function (e) {
+    editing = null; stopPreview(); bgmSel = {}; lib.activeClient = e.target.value; save(); renderAll();
+    setStatus('Switched to ' + client().name + '.');
+  });
+
+  $('#addClient').addEventListener('click', function () {
+    var name = window.prompt('New client name');
+    if (!name || !name.trim()) return;
+    var c = { id: uid(), name: name.trim(), assets: [] };
+    lib.clients.push(c); lib.activeClient = c.id; editing = null; save(); renderAll();
+    setStatus('Created ' + c.name + '.', 'ok');
+  });
+
+  $('#renameClient').addEventListener('click', function () {
+    var c = client(); var name = window.prompt('Rename client', c.name);
+    if (!name || !name.trim()) return;
+    var oldDir = libraryOn() ? clientDir(c) : null;
+    c.name = name.trim();
+    if (oldDir && nodeFs.existsSync(oldDir) && !nodeFs.existsSync(clientDir(c))) {
+      try {
+        nodeFs.renameSync(oldDir, clientDir(c));
+        c.assets.forEach(function (a) {
+          if (a.exportFile && inside(oldDir, a.exportFile)) a.exportFile = nodePath.join(clientDir(c), nodePath.relative(oldDir, a.exportFile));
+          if (a.path && inside(oldDir, a.path)) a.path = nodePath.join(clientDir(c), nodePath.relative(oldDir, a.path));
+        });
+        writeClientJson(c);
+      } catch (err) { setStatus('Renamed, but couldn’t rename the client folder: ' + err.message, 'err'); }
+    }
+    save(); renderClients(); if (view === 'settings') renderSettings();
+    setStatus('Renamed to ' + c.name + '.', 'ok');
+  });
+
+  $('#deleteClient').addEventListener('click', function () {
+    var c = client();
+    if (lib.clients.length === 1) { setStatus('Keep at least one client. Rename this one instead.', 'err'); return; }
+    if (!window.confirm('Delete ' + c.name + ' and its ' + c.assets.length + ' saved sounds? Audio files stay on disk.')) return;
+    lib.clients = lib.clients.filter(function (x) { return x.id !== c.id; });
+    lib.activeClient = lib.clients[0].id; editing = null; save(); renderAll(); setStatus('Deleted ' + c.name + '.');
+  });
+
+  document.querySelectorAll('.tab').forEach(function (t) {
+    t.addEventListener('click', function () {
+      editing = null; stopPreview(); lib.activeKind = t.dataset.kind; view = 'sounds'; save();
+      renderAll();
+      if (lib.activeKind === 'check' && inCEP) {
+        host('CSK.sequenceInfo()').then(function (r) {
+          var n = Number(r.split('|')[1]);
+          if (n > 0 && n !== seqTracks) { seqTracks = n; renderCheck(); }
+        });
+      }
+    });
+  });
+
+  $('#settingsBtn').addEventListener('click', function () { openSettings(view !== 'settings'); });
+
+  // ---------- Add sounds / capture ----------
+  $('#addSounds').addEventListener('click', function () { pickFiles(lib.activeKind !== 'part').then(addFiles); });
+  $('#captureBtn').addEventListener('click', captureFromTimeline);
+
+  // Files dragged in from Explorer/Finder. Drags that start in this panel are ignored here.
+  function acceptsDrop() { return view === 'sounds' && lib.activeKind !== 'check' && !internalDrag; }
+  var dz = document.body;
+  dz.addEventListener('dragover', function (e) { if (!acceptsDrop()) return; e.preventDefault(); $('#dropzone').classList.add('over'); });
+  dz.addEventListener('dragleave', function (e) { if (!e.relatedTarget) $('#dropzone').classList.remove('over'); });
+  dz.addEventListener('drop', function (e) {
+    $('#dropzone').classList.remove('over');
+    if (!acceptsDrop()) return;
+    e.preventDefault();
+    var paths = [];
+    for (var i = 0; i < e.dataTransfer.files.length; i++) {
+      var f = e.dataTransfer.files[i]; if (f.path) paths.push(f.path);
+    }
+    if (paths.length) addFiles(paths);
+    else setStatus('Couldn’t read dropped files here. Use Add sounds instead.', 'err');
+  });
+
+  window.__cskTest = { encodeWav: encodeWav, renderRange: renderRange, decode: decode, dragSpec: dragSpec, prepareDrag: prepareDrag,
+    bandProfile: bandProfile, measure: measure, importFromDir: importFromDir, runSyncAll: runSyncAll,
+    lib: function () { return lib; }, check: function () { return check; }, bgmSel: function () { return bgmSel; } };
+
+  // ---------- Boot ----------
+  renderAll();
+  if (inCEP) {
+    host('CSK.ping()').then(function (r) {
+      if (r.indexOf('OK|') === 0) setStatus('Ready. Move the playhead, then click a sound or drag it to the timeline.');
+      else setStatus('Couldn’t talk to Premiere: ' + r, 'err');
+    });
+    host('CSK.sequenceInfo()').then(function (r) { var n = Number(r.split('|')[1]); if (n > 0) seqTracks = n; });
+  } else {
+    setStatus('Preview mode: open inside Premiere Pro to place sounds.');
+  }
+})();

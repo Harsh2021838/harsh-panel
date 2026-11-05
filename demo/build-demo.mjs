@@ -6,7 +6,7 @@ import fs from "node:fs";
 const css = (await esbuild.build({ entryPoints: ["src/styles.css"], bundle: true, minify: true, write: false })).outputFiles[0].text;
 const js = (await esbuild.build({
   entryPoints: ["src/main.jsx"], bundle: true, minify: true, format: "iife", target: ["chrome90"], jsx: "automatic",
-  charset: "ascii", define: { "process.env.NODE_ENV": '"production"' }, write: false, loader: { ".css": "empty" },
+  charset: "ascii", define: { "process.env.NODE_ENV": '"production"' }, write: false, loader: { ".css": "empty", ".txt": "text" },
 })).outputFiles[0].text;
 const poly = (await esbuild.build({
   stdin: { contents: 'window.__NodeBuffer = require("buffer").Buffer;', resolveDir: process.cwd() },
@@ -41,6 +41,7 @@ const data = "window.__DEMO_AEP=" + JSON.stringify(fs.readFileSync("demo/sample.
   ";window.__HOST_FILES=" + JSON.stringify({
     "text-qc.jsx": fs.readFileSync("static/jsx/text-qc.jsx", "utf8"),
     "harsh-library.jsx": fs.readFileSync("static/jsx/harsh-library.jsx", "utf8"),
+    "client-sound-kit.jsx": fs.readFileSync("static/jsx/client-sound-kit.jsx", "utf8"),
   }) + ";window.__LIBRARY=" + JSON.stringify(readTree("demo/library")) + ";";
 
 const panel =

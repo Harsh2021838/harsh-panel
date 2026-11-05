@@ -1,0 +1,28 @@
+  <header class="top">
+    <div class="row">
+      <select id="clientSelect" title="Client" aria-label="Client"></select>
+      <button id="addClient" class="icon" title="New client" aria-label="New client">+</button>
+      <button id="renameClient" class="icon" title="Rename client" aria-label="Rename client">✎</button>
+      <button id="deleteClient" class="icon" title="Delete client" aria-label="Delete client">🗑</button>
+      <button id="settingsBtn" class="icon" title="Settings" aria-label="Settings">⚙</button>
+    </div>
+    <div class="tabs" role="tablist">
+      <button class="tab active" data-kind="sfx" role="tab">SFX</button>
+      <button class="tab" data-kind="part" role="tab">BGM parts</button>
+      <button class="tab" data-kind="bgm" role="tab">Full BGM</button>
+      <button class="tab check-tab" data-kind="check" role="tab">Check</button>
+    </div>
+  </header>
+
+  <main id="list" class="list"></main>
+  <main id="check" class="list hidden"></main>
+  <main id="settings" class="list hidden"></main>
+
+  <div id="dropzone" class="dropzone">
+    <button id="captureBtn" class="capture hidden">Save selected timeline clip</button>
+    <button id="addSounds" class="primary wide">+ Add sounds</button>
+    <div class="hint" id="dropHint">or drag audio files here</div>
+  </div>
+
+  <footer id="status" class="status" role="status">Ready</footer>
+

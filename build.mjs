@@ -21,6 +21,7 @@ await esbuild.build({
   jsx: "automatic",
   charset: "ascii",     // keep the bundle pure ASCII
   define: { "process.env.NODE_ENV": '"production"' },
+  loader: { ".txt": "text" },
   outfile: path.join(ext, "app", "main.js"),
   logLevel: "warning",
 });

@@ -1,21 +1,24 @@
 import React, { useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { hostApp, hostName, hostBackground, onThemeChange, extensionPath, host } from "./host.js";
-import { Wrench, Image, Helix, Check, Proof, Back, Chevron, Gear, Caret, Plus } from "./icons.jsx";
+import { Wrench, Image, Helix, Check, Proof, Back, Chevron, Gear, Caret, Plus, Wave } from "./icons.jsx";
 import Settings from "./sections/Settings.jsx";
 import { findUpdate, installUpdate, updateMode, downloadUpdate } from "./updater.js";
 import ClientDNA, { ClientLogo } from "./sections/ClientDNA.jsx";
 import Assets from "./sections/Assets.jsx";
 import { listClients } from "./library.js";
 import TextQC from "./tools/text-qc/TextQC.jsx";
+import SoundKit from "./tools/sound-kit/SoundKit.jsx";
 import "./styles.css";
 
-const VERSION = "2.6.0";
+const VERSION = "2.7.0";
 
 // The four sections. Add a tool by putting it in a section's `tools` list
 // (or drop a plugin file into /plugins, see plugins/README.md).
 const SECTIONS = [
-  { id: "tools", name: "Tools", icon: Wrench, empty: "Editing helpers you add will show up here.", tools: [] },
+  { id: "tools", name: "Tools", icon: Wrench, empty: "Editing helpers you add will show up here.", tools: [
+    { id: "sound-kit", name: "Sound Kit", description: "Each client's SFX and BGM, levelled and coloured, placed in one click", icon: () => <Wave size={18} />, hosts: ["PPRO"], fill: true, Component: SoundKit },
+  ] },
   { id: "assets", name: "Assets", icon: Image, screen: "assets", tools: [] },
   { id: "client-dna", name: "Client DNA", icon: Helix, screen: "dna", tools: [] },
   {
@@ -229,7 +232,7 @@ function App() {
           const C = t.Component;
           const on = current === t && !settingsOpen;
           return (
-            <div key={t.id} hidden={!on} className="tool-screen">
+            <div key={t.id} hidden={!on} className={"tool-screen" + (t.fill ? " fill" : "")}>
               <div className="tool-head">
                 <button className="icon-btn" onClick={close} aria-label={"Back to " + section.name}><Back /></button>
                 <h1 className="tool-title">{t.name}</h1>
