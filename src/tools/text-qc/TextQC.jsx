@@ -204,7 +204,21 @@ export default function TextQC({ report = () => {} }) {
     } catch (e) { fail(e); }
   }
 
-  const jump = (it) => { setErr(""); host(isAE ? "aeJump" : "prJump", it).catch(fail); };
+  // One jump at a time, latest wins, so fast clicking or auto go to never stacks calls in the app.
+  const jumping = useRef({ busy: false, next: null });
+  const jump = (it) => {
+    setErr("");
+    const q = jumping.current;
+    q.next = it;
+    if (q.busy) return;
+    const runNext = () => {
+      const a = q.next; q.next = null;
+      if (!a) { q.busy = false; return; }
+      q.busy = true;
+      host(isAE ? "aeJump" : "prJump", a).catch(fail).then(() => setTimeout(runNext, 60));
+    };
+    runNext();
+  };
 
   async function fix(g, replacement) {
     setErr("");

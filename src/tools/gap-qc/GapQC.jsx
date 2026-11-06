@@ -18,7 +18,7 @@ const CHECKS = [
   ["sync", "Audio out of sync"],
   ["black", "Black or offline clips"],
   ["rate", "Frame rate"],
-  ["dups", "Same shot twice"],
+  ["dups", "Same moment twice"],
 ];
 const GAP_KINDS = { start: 1, between: 1, end: 1 };
 const isGap = (g) => !!GAP_KINDS[g.kind];
@@ -42,7 +42,7 @@ function what(g) {
   if (g.kind === "flash") return g.frames + "-frame clip (flash frame)";
   if (g.kind === "subframe") return "Not on a whole frame";
   if (g.kind === "fps") return g.rate + " fps clip in a " + g.seqRate + " fps sequence";
-  if (g.kind === "dup") return "Same shot used " + g.count + " times";
+  if (g.kind === "dup") return "Same moment used twice (" + len(g) + ")";
   if (g.kind === "blackvideo") return "Black Video clip";
   if (g.kind === "offline") return "Media offline";
   return g.frames > g.fps * 1.5 ? f + " gap" : g.frames + "-frame gap";
@@ -59,7 +59,7 @@ function detail(g) {
   if (g.kind === "flash") return q(g.prev) + " is only " + plural(g.frames, "frame") + " long, so it flashes on screen. Delete it or make it longer.";
   if (g.kind === "subframe") return q(g.prev) + " starts " + g.part + "% of the way into a frame, which can cause a flash or a blend at the cut. Nudge it onto the frame.";
   if (g.kind === "fps") return q(g.prev) + " is " + g.rate + " fps; the sequence is " + g.seqRate + " fps. Fine for slow motion, otherwise it may stutter.";
-  if (g.kind === "dup") return q(g.prev) + " is used at " + g.uses.map((u) => u.track + " " + u.tc).join(", ") + ". Check that\u2019s on purpose.";
+  if (g.kind === "dup") return "The same " + len(g) + " of " + q(g.prev) + " plays here and again at " + g.againTrack + " " + g.againTc + ". Check that\u2019s on purpose.";
   if (g.kind === "blackvideo") return q(g.prev) + " is a Black Video clip. Check it\u2019s meant to be there.";
   if (g.kind === "offline") return "The media for " + q(g.prev) + " is offline. Relink it before export.";
   return "Between " + q(g.prev) + " and " + q(g.next) + ".";
@@ -89,7 +89,7 @@ function GapPicture({ g }) {
       <span className={"gap-pic solo " + g.kind} aria-hidden="true">
         <i className="clip" />
         {g.kind === "flash" ? <i className="hole" style={{ width: Math.min(6 + g.frames * 4, 26) }}><b className="num">{g.frames}</b></i>
-          : <i className="mark-clip">{g.kind === "fps" ? "fps" : g.kind === "dup" ? "\u00D7" + g.count : "\u00BD"}</i>}
+          : <i className="mark-clip">{g.kind === "fps" ? "fps" : g.kind === "dup" ? "\u00D72" : "\u00BD"}</i>}
         <i className="clip" />
       </span>
     );
@@ -144,7 +144,7 @@ export default function GapQC({ report = () => {} }) {
     const t0 = performance.now();
     try {
       const r = await call(isAE ? "aeScan" : "prScan", { scope, maxFrames, audio, checks: isAE ? { gaps: true } : checks });
-      r.gaps.forEach((g) => { g.tc = timecode(g.time, g.fps); if (g.uses) g.uses.forEach((u) => { u.tc = timecode(u.t, g.fps); }); });
+      r.gaps.forEach((g) => { g.tc = timecode(g.time, g.fps); if (g.againAt !== undefined) g.againTc = timecode(g.againAt, g.fps); });
       // Black flashes first, then by place in the edit.
       const rank = (g) => (g.kind === "offline" ? 0 : g.black ? 1 : 2);
       r.gaps.sort((a, b) => (rank(a) - rank(b)) || (a.container < b.container ? -1 : a.container > b.container ? 1 : a.time - b.time));
@@ -204,7 +204,24 @@ export default function GapQC({ report = () => {} }) {
       }).catch((e) => setErr(e.message));
     } catch (e) { setErr(e.message); }
   }
-  const jump = (g) => { setErr(""); call(isAE ? "aeJump" : "prJump", g).catch((e) => setErr(e.message)); };
+  // One jump at a time, and only the latest one: several calls into Premiere at once
+  // (clicking fast, or auto go to right after a fix) can make it fall over.
+  const jumping = useRef({ busy: false, next: null });
+  function jump(g) {
+    setErr("");
+    const arg = isAE ? { containerId: g.containerId, time: g.time, prevIndex: g.prevIndex, nextIndex: g.nextIndex, layers: g.layers }
+      : { containerId: g.containerId, startTicks: g.startTicks };
+    const q = jumping.current;
+    q.next = arg;
+    if (q.busy) return;
+    const runNext = () => {
+      const a = q.next; q.next = null;
+      if (!a) { q.busy = false; return; }
+      q.busy = true;
+      call(isAE ? "aeJump" : "prJump", a).catch((e) => setErr(e.message)).then(() => setTimeout(runNext, 60));
+    };
+    runNext();
+  }
   async function fix(g) {
     setErr(""); setNote("");
     try { await call(isAE ? "aeFix" : "prFix", g); done(g, "fixed"); setNote("Closed. " + (isAE ? "Cmd/Ctrl+Z in After Effects undoes it." : "Cmd/Ctrl+Z in Premiere undoes it.")); }

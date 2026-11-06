@@ -48,12 +48,13 @@
             var clip = clips[c], off = false;
             if (!clip) continue;
             try { off = !!clip.disabled; } catch (e) {}
-            var item = null, node = "", inPt = null;
+            var item = null, node = "", inPt = null, outPt = null;
             if (deep) {
                 try { item = clip.projectItem; node = item ? String(item.nodeId || item.name) : ""; } catch (e) {}
                 try { inPt = clip.inPoint ? ticks(clip.inPoint) : null; } catch (e) {}
+                try { outPt = clip.outPoint ? ticks(clip.outPoint) : null; } catch (e) {}
             }
-            out.push({ i: c, name: clip.name, start: ticks(clip.start), end: ticks(clip.end), off: off, item: item, node: node, inPt: inPt });
+            out.push({ i: c, name: clip.name, start: ticks(clip.start), end: ticks(clip.end), off: off, item: item, node: node, inPt: inPt, outPt: outPt });
         }
         out.sort(function (a, b) { return a.start - b.start; });
         return out;
@@ -200,13 +201,20 @@
                 if (!uses[dc.node]) { uses[dc.node] = []; orderD.push(dc.node); }
                 uses[dc.node].push({ track: dt, clip: dc });
             }
+            // Cutting the same interview many times is normal. What's a mistake is showing the
+            // same moment of a shot twice: two uses whose source ranges overlap.
             for (var u = 0; u < orderD.length; u++) {
-                var list2 = uses[orderD[u]];
-                if (list2.length < 2) continue;
-                var times = [];
-                for (var w = 0; w < list2.length; w++) times.push({ t: list2[w].clip.start / TICKS, track: "V" + (list2[w].track + 1) });
-                issue("dup", list2[0].track, "V" + (list2[0].track + 1), list2[0].clip.start, list2[0].clip.end, list2[0].clip, list2[1].clip,
-                    { uses: times, count: list2.length, trackB: list2[1].track });
+                var list2 = uses[orderD[u]], found = 0;
+                for (var p1 = 0; p1 < list2.length && found < 20; p1++) for (var p2 = p1 + 1; p2 < list2.length && found < 20; p2++) {
+                    var c1 = list2[p1].clip, c2 = list2[p2].clip;
+                    if (c1.inPt === null || c2.inPt === null || c1.outPt === null || c2.outPt === null) continue;
+                    var ov = Math.min(c1.outPt, c2.outPt) - Math.max(c1.inPt, c2.inPt);
+                    if (ov <= frame) continue;
+                    found++;
+                    var first = c1.start <= c2.start ? list2[p1] : list2[p2], second = first === list2[p1] ? list2[p2] : list2[p1];
+                    issue("dup", first.track, "V" + (first.track + 1), first.clip.start, first.clip.end, first.clip, second.clip,
+                        { trackB: second.track, frames: Math.round(ov / frame), againAt: second.clip.start / TICKS, againTrack: "V" + (second.track + 1) });
+                }
             }
         }
         for (var k = 0; k < kinds.length; k++) {
@@ -282,19 +290,18 @@
         return { added: added };
     };
 
+    // Move the playhead to the problem. Kept deliberately small: changing the clip selection
+    // (getSelection / setSelected) from a script can crash some Premiere versions, so it only
+    // opens the sequence when it isn't already the open one, then moves the playhead.
     api.prJump = function (g) {
-        var seq = seqById(g.containerId);
-        app.project.openSequence(seq.sequenceID);
-        seq = app.project.activeSequence || seq;
-        seq.setPlayerPosition(g.startTicks);
-        try {
-            var sel = seq.getSelection();
-            for (var i = 0; i < sel.length; i++) sel[i].setSelected(false, false);
-            var tr = prTracks(seq, g)[g.track];
-            var tr2 = (g.kind === "cut" || g.kind === "dup") ? seq.videoTracks[g.trackB] : g.kind === "sync" ? seq.audioTracks[g.audioTrack] : tr;
-            if (g.prevIndex >= 0) tr.clips[g.prevIndex].setSelected(true, true);
-            if (g.nextIndex >= 0) tr2.clips[g.nextIndex].setSelected(true, true);
-        } catch (e) {}
+        var seq = app.project.activeSequence;
+        if (!seq || seq.sequenceID !== g.containerId) {
+            var target = seqById(g.containerId);
+            app.project.openSequence(target.sequenceID);
+            seq = app.project.activeSequence;
+            if (!seq || seq.sequenceID !== g.containerId) throw new Error("Couldn't open that sequence. Open it in the timeline and try again.");
+        }
+        seq.setPlayerPosition(String(g.startTicks));
         return true;
     };
 

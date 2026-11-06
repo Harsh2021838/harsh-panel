@@ -388,21 +388,20 @@
         return { ok: true };
     };
 
+    // Move the playhead to the text. Only opens the sequence if it isn't already open, and
+    // doesn't touch the clip selection: getSelection/setSelected from a script can crash Premiere.
     api.prJump = function (a) {
-        var target = null;
-        for (var s = 0; s < app.project.sequences.numSequences; s++) {
-            if (app.project.sequences[s].sequenceID === a.containerId) target = app.project.sequences[s];
+        var seq = app.project.activeSequence;
+        if (!seq || seq.sequenceID !== a.containerId) {
+            var target = null;
+            for (var s = 0; s < app.project.sequences.numSequences; s++) {
+                if (app.project.sequences[s].sequenceID === a.containerId) target = app.project.sequences[s];
+            }
+            if (!target) throw new Error("Sequence not found.");
+            app.project.openSequence(target.sequenceID);
+            seq = app.project.activeSequence || target;
         }
-        if (!target) throw new Error("Sequence not found.");
-        app.project.openSequence(target.sequenceID);
-        var seq = app.project.activeSequence || target;
-        seq.setPlayerPosition(a.startTicks);
-        try {
-            var sel = seq.getSelection();
-            for (var i = 0; i < sel.length; i++) sel[i].setSelected(false, false);
-            var clip = seq.videoTracks[a.track].clips[a.clipIndex];
-            if (clip) clip.setSelected(true, true);
-        } catch (e) {}
+        seq.setPlayerPosition(String(a.startTicks));
         return true;
     };
 

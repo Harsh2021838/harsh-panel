@@ -187,7 +187,7 @@
     var arr = function (a) { a.numItems = a.length; return a; };
     function textComp(t) { return { matchName: "AE.ADBE Text", displayName: "Text", properties: arr([{ displayName: "Source Text", getValue: function () { return JSON.stringify({ textEditValue: t }); } }]) }; }
     function clip(name, at, comps, mgt, item, dur) {
-      return { name: name, start: { ticks: String(Math.round(254016000000 * at)), seconds: at }, end: { ticks: String(Math.round(254016000000 * (at + (dur || 3)))) }, inPoint: { ticks: "0" },
+      return { name: name, start: { ticks: String(Math.round(254016000000 * at)), seconds: at }, end: { ticks: String(Math.round(254016000000 * (at + (dur || 3)))) }, inPoint: { ticks: "0" }, outPoint: { ticks: String(Math.round(254016000000 * (dur || 3))) },
         components: arr([{ matchName: "AE.ADBE Motion", displayName: "Motion", properties: arr([]) }].concat(comps || [])),
         getMGTComponent: function () { return mgt ? { properties: arr(mgt.map(function (p) { return { displayName: p[0], getValue: function () { return p[1]; } }; })) } : null; },
         projectItem: item || { name: name, getMediaPath: function () { return ""; }, isSequence: function () { return false; } },
