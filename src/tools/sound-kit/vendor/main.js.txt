@@ -907,6 +907,26 @@
     });
     return cleanKeys(keys);
   }
+  // A transition's fade (Constant Power shape) written as keyframes over [0, fadeIn] and
+  // [len - fadeOut, len]; keyframes inside a fade are replaced by it.
+  function withFades(keys, len, fi, fo, db) {
+    fi = Math.min(Number(fi) || 0, len / 2); fo = Math.min(Number(fo) || 0, len / 2);
+    if (!(fi > 0.02) && !(fo > 0.02)) return keys;
+    if (!keys.length) keys = [[0, db], [len, db]];
+    function at(t) {
+      if (t <= keys[0][0]) return keys[0][1];
+      for (var i = 1; i < keys.length; i++) if (t <= keys[i][0]) {
+        var sp = keys[i][0] - keys[i - 1][0] || 1; return keys[i - 1][1] + (keys[i][1] - keys[i - 1][1]) * (t - keys[i - 1][0]) / sp;
+      }
+      return keys[keys.length - 1][1];
+    }
+    var shape = [[0, null], [0.25, -8.34], [0.5, -3.01], [0.75, -0.69]];
+    var out = [], lvIn = at(fi), lvOut = at(len - fo);
+    if (fi > 0.02) { shape.forEach(function (s) { out.push([s[0] * fi, s[1] === null ? MIN_DB : Math.max(MIN_DB, lvIn + s[1])]); }); out.push([fi, lvIn]); }
+    keys.forEach(function (k) { if ((!(fi > 0.02) || k[0] > fi + 0.005) && (!(fo > 0.02) || k[0] < len - fo - 0.005)) out.push(k); });
+    if (fo > 0.02) { out.push([len - fo, lvOut]); shape.slice().reverse().forEach(function (s) { out.push([len - s[0] * fo, s[1] === null ? MIN_DB : Math.max(MIN_DB, lvOut + s[1])]); }); }
+    return cleanKeys(out);
+  }
   // The pieces as one WAV: each piece where it sits on the timeline, at full level (the volume is
   // in the keyframes). Same pieces, same file name, so saving them again is caught as a duplicate.
   function renderGroup(g) {
@@ -942,11 +962,12 @@
         if (g.length === 1) {
           var dup1 = duplicateOf('part', first.path, first.inS, first.outS);
           if (dup1) { dups.push(dup1); return Promise.resolve(); }
-          saved.push(newAsset('part', first.path, Object.assign(common, { in: first.inS, out: first.outS, keys: cleanKeys((first.keys || []).slice()), db: first.db })));
+          var k1 = withFades(cleanKeys((first.keys || []).slice()), first.outS - first.inS, first.fadeIn, first.fadeOut, first.db);
+          saved.push(newAsset('part', first.path, Object.assign(common, { in: first.inS, out: first.outS, keys: k1, db: k1.length ? k1[0][1] : first.db })));
           return Promise.resolve();
         }
         joined++;
-        var keys = groupKeys(g);
+        var keys = withFades(groupKeys(g), last.end - first.start, first.fadeIn, last.fadeOut, first.db);
         return renderGroup(g).then(function (r) {
           var dupG = duplicateOf('part', r.file, 0, r.len);
           if (dupG) { dups.push(dupG); return; }
@@ -2426,7 +2447,7 @@
     });
   });
 
-  window.__cskTest = { joinCaptured: joinCaptured, groupCaptured: groupCaptured, groupKeys: groupKeys, cleanKeys: cleanKeys, bgmFadeKeys: bgmFadeKeys, duplicateOf: duplicateOf, encodeWav: encodeWav, renderRange: renderRange, decode: decode, dragSpec: dragSpec, prepareDrag: prepareDrag,
+  window.__cskTest = { joinCaptured: joinCaptured, groupCaptured: groupCaptured, groupKeys: groupKeys, cleanKeys: cleanKeys, withFades: withFades, bgmFadeKeys: bgmFadeKeys, duplicateOf: duplicateOf, encodeWav: encodeWav, renderRange: renderRange, decode: decode, dragSpec: dragSpec, prepareDrag: prepareDrag,
     bandProfile: bandProfile, measure: measure, importFromDir: importFromDir, runSyncAll: runSyncAll,
     lib: function () { return lib; }, check: function () { return check; }, bgmSel: function () { return bgmSel; } };
 

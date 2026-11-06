@@ -203,6 +203,24 @@ var FrameshiftSK = (function () { // own global: the old standalone Client Sound
         return { track: tracks[trackIndex], index: trackIndex };
     }
 
+    // Audio transitions (Constant Power, Exponential Fade...) at a clip's start and end, as the
+    // seconds they cover inside the clip: [fadeIn, fadeOut]. Transitions aren't volume keyframes,
+    // so the panel turns them into keyframes when it saves the clip.
+    function fadesOf(track, clip) {
+        var fi = 0, fo = 0, list = null;
+        try { list = track.transitions; } catch (e) {}
+        if (!list) return [0, 0];
+        var st = clip.start.seconds, en = clip.end.seconds, n = 0;
+        try { n = list.numItems; } catch (e2) { return [0, 0]; }
+        for (var k = 0; k < n; k++) {
+            var ts, te;
+            try { ts = list[k].start.seconds; te = list[k].end.seconds; } catch (e3) { continue; }
+            if (ts <= st + 0.05 && te > st + 0.01) fi = Math.max(fi, Math.min(te, en) - st);
+            if (te >= en - 0.05 && ts < en - 0.01) fo = Math.max(fo, en - Math.max(ts, st));
+        }
+        return [r(fi, 3), r(fo, 3)];
+    }
+
     // Colour a timeline clip and report what Premiere then shows: "got:<index>" or "nolabel" when
     // this Premiere has no colour functions for timeline clips (the project item is coloured anyway).
     function labelClip(clip, colorIndex) {
@@ -319,8 +337,8 @@ var FrameshiftSK = (function () { // own global: the old standalone Client Sound
                     var path = "";
                     try { path = clip.projectItem ? clip.projectItem.getMediaPath() : ""; } catch (e6) {}
                     if (!path) continue;
-                    var v = readVolume(clip);
-                    out.push({ name: clip.name, path: path, track: ti,
+                    var v = readVolume(clip), fades = ti >= 0 ? fadesOf(ats[ti], clip) : [0, 0];
+                    out.push({ name: clip.name, path: path, track: ti, fadeIn: fades[0], fadeOut: fades[1],
                         start: r(clip.start.seconds, 3), end: r(clip.end.seconds, 3), seqEnd: r(seqEnd, 3),
                         inS: r(clip.inPoint.seconds, 3), outS: r(clip.outPoint.seconds, 3),
                         db: v.db, keys: v.keys, mode: v.mode });

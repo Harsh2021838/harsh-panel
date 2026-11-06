@@ -1,6 +1,6 @@
 {
   "name": "harsh-panel",
-  "version": "2.15.6",
+  "version": "2.15.7",
   "description": "Harsh panel for Premiere Pro and After Effects",
   "scripts": {
     "build": "node build.mjs"

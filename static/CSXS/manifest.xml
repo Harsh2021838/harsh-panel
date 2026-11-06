@@ -2,12 +2,12 @@
 <ExtensionManifest
 Version="6.0"
 ExtensionBundleId="com.harsh.panel"
-ExtensionBundleVersion="2.15.6"
+ExtensionBundleVersion="2.15.7"
 ExtensionBundleName="Frameshift"
 xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
 >
 <ExtensionList>
-  <Extension Id="com.harsh.panel.main" Version="2.15.6" />
+  <Extension Id="com.harsh.panel.main" Version="2.15.7" />
 </ExtensionList>
 <ExecutionEnvironment>
   <HostList>
