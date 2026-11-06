@@ -35,6 +35,14 @@
     }
     function isAE() { return typeof CompItem !== "undefined"; }
 
+    // Each step is written to a small log file (opened and closed every time, so it's on disk
+    // even if Premiere crashes). The panel reads it afterwards to see where a check stopped.
+    var LOG = "";
+    function step(name) {
+        if (!LOG) return;
+        try { var f = new File(LOG); f.encoding = "UTF-8"; f.open("a"); f.writeln(name); f.close(); } catch (e) {}
+    }
+
     // ================================================================ Premiere
     var TICKS = 254016000000;
     function ticks(t) { return Number(t.ticks); }
@@ -85,8 +93,10 @@
         if (!checks.gaps) kinds = [];
         var V = [], A = [];
         var deep = !!(checks.sync || checks.black || checks.rate || checks.dups);
+        step("read " + (deep ? "deep" : "plain"));
         var vts = seq.videoTracks, nv = vts.numTracks;
         for (var vt = 0; vt < nv; vt++) V.push(clipList(vts[vt], deep));
+        step("audio");
         if (checks.sync || a.audio) {
             try { var ats = seq.audioTracks, na = ats.numTracks; for (var at = 0; at < na; at++) A.push(clipList(ats[at], checks.sync)); } catch (e) {}
         }
@@ -99,6 +109,7 @@
             out.push(g);
         }
         // Cuts on two video tracks that are a few frames apart (a flash of the wrong shot).
+        step("cuts");
         if (checks.cuts) {
             var cuts = [];
             for (var ct = 0; ct < V.length; ct++) {
@@ -132,6 +143,7 @@
             }
         }
         // Video and its own audio drifted out of sync.
+        step("sync");
         if (checks.sync) {
             for (var sv = 0; sv < V.length; sv++) for (var si = 0; si < V[sv].length; si++) {
                 var vc = V[sv][si];
@@ -150,6 +162,7 @@
             }
         }
         // Black Video clips and offline media.
+        step("black");
         if (checks.black) {
             for (var bt = 0; bt < V.length; bt++) for (var bi = 0; bi < V[bt].length; bi++) {
                 var bc = V[bt][bi], why = "";
@@ -169,6 +182,7 @@
             }
         }
         // Frame rate problems: clips not starting on a whole frame, and footage at another frame rate.
+        step("rate");
         if (checks.rate) {
             var seenRate = {};
             for (var rt = 0; rt < V.length; rt++) for (var ri = 0; ri < V[rt].length; ri++) {
@@ -184,12 +198,14 @@
                 try { if (rc.item.isSequence && rc.item.isSequence()) continue; } catch (e) { continue; }
                 try { media = String(rc.item.getMediaPath() || ""); } catch (e) { media = ""; }
                 if (!/\.(mp4|mov|mxf|m4v|avi|mts|m2ts|mpg|mpeg|wmv|webm|mkv|r3d|braw|crm|dng|ari|3gp)$/i.test(media)) continue;
+                step("rate " + media);
                 try { rate = Number(rc.item.getFootageInterpretation().frameRate); } catch (e) {}
                 if (rate > 1000) rate = TICKS / rate;
                 if (rate > 0 && rate < 1000 && Math.abs(rate - fps) > 0.01) issue("fps", rt, "V" + (rt + 1), rc.start, rc.end, rc, null, { rate: Math.round(rate * 100) / 100, seqRate: Math.round(fps * 100) / 100 });
             }
         }
         // The same shot used more than once.
+        step("dups");
         if (checks.dups) {
             var uses = {}, orderD = [];
             for (var dt = 0; dt < V.length; dt++) for (var di = 0; di < V[dt].length; di++) {
@@ -217,6 +233,7 @@
                 }
             }
         }
+        step("gaps");
         for (var k = 0; k < kinds.length; k++) {
             var letter = kinds[k][0], tracks = kinds[k][1], all = [];
             all = letter === "V" ? V : A;
@@ -254,6 +271,7 @@
     }
 
     api.prScan = function (a) {
+        LOG = a.logPath || "";
         if (!app.project) throw new Error("No project open.");
         var out = [], seqs = [];
         if (a.scope === "active") {
@@ -262,7 +280,8 @@
         } else {
             for (var s = 0; s < app.project.sequences.numSequences; s++) seqs.push(app.project.sequences[s]);
         }
-        for (var i = 0; i < seqs.length; i++) prSequence(seqs[i], a, out);
+        for (var i = 0; i < seqs.length; i++) { step("sequence " + seqs[i].name); prSequence(seqs[i], a, out); }
+        step("done");
         return { project: app.project.name, containers: seqs.length, gaps: out };
     };
 

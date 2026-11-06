@@ -8,6 +8,34 @@ import { Target, Check, Ban, Join } from "../../icons.jsx";
 import { timecode } from "../text-qc/premiere-sources.js";
 
 const call = makeHost("gap-qc.jsx", "HarshGapQC");
+
+// ---- crash guard ----------------------------------------------------------
+// Every check and every jump writes its steps to Tools/Gap QC/last-check.log (Premiere writes
+// the scan steps itself). If Premiere crashes, the log ends mid-way; next time Gap QC opens it
+// reads where it stopped, turns that part off and says so.
+const fs = nodeRequire("fs"), pathMod = nodeRequire("path");
+let logFile = "";
+async function logPath() { if (!logFile) logFile = pathMod.join(await toolDir("Gap QC"), "last-check.log"); return logFile; }
+function logLine(line, fresh) { try { if (logFile) (fresh ? fs.writeFileSync : fs.appendFileSync)(logFile, line + "\n"); } catch (e) {} }
+const STEP_FIX = [
+  [/^read deep/, ["sync", "black", "rate", "dups"], "while reading clip details"],
+  [/^audio/, ["sync"], "while reading the audio tracks"],
+  [/^sync/, ["sync"], "during the audio sync check"],
+  [/^black/, ["black"], "during the black and offline clip check"],
+  [/^rate/, ["rate"], "while reading a clip\u2019s frame rate"],
+  [/^dups/, ["dups"], "during the same-moment check"],
+  [/^cuts/, ["cuts"], "during the cuts check"],
+];
+/** What the log says about the last run: null (all fine) or { off: [...], where, file, jump }. */
+function lastCrash(text) {
+  const lines = String(text || "").split("\n").filter(Boolean);
+  if (!lines.length) return null;
+  const last = lines[lines.length - 1];
+  if (/^(done|panel done|jumped|handled)/.test(last)) return null;
+  if (/^jump/.test(last)) return { jump: true };
+  for (const [re, off, where] of STEP_FIX) if (re.test(last)) return { off, where, file: /^rate /.test(last) ? last.slice(5) : "" };
+  return { off: [], where: "during the check" };
+}
 const isAE = hostApp === "AEFT";
 const SCOPES = isAE ? [["active", "Open comp"], ["all", "All comps"]] : [["active", "Open sequence"], ["all", "All sequences"]];
 const plural = (n, one, many) => n + " " + (n === 1 ? one : many || one + "s");
@@ -110,6 +138,26 @@ export default function GapQC({ report = () => {} }) {
   const [scope, setScope] = useState(() => lsGet("scope2", SCOPES[0][0]));
   const [sel, setSel] = useState(null); // key of the selected row
   const [editSetup, setEditSetup] = useState(false);
+  const [crashNote, setCrashNote] = useState("");
+  useEffect(() => {
+    if (isAE) return;
+    logPath().then((f) => {
+      let text = "";
+      try { text = fs.readFileSync(f, "utf8"); } catch (e) { return; }
+      const c = lastCrash(text);
+      if (!c) return;
+      if (c.jump) {
+        setAutoGo(false);
+        setCrashNote("Premiere stopped last time while Gap QC moved the playhead. \u201CGo to the next one automatically\u201D is now off; click a row when you want to go to it.");
+      } else {
+        const names = CHECKS.filter(([id]) => c.off.indexOf(id) !== -1).map((x) => x[1]);
+        if (c.off.length) setChecks((cur) => { const n = { ...cur }; c.off.forEach((id) => { n[id] = false; }); return n; });
+        setCrashNote("Premiere stopped last time " + c.where + (c.file ? " (" + pathMod.basename(c.file) + ")" : "") + ". " +
+          (names.length ? "Turned off: " + names.join(", ") + ". Everything else still works." : "Try the open sequence only, and tell Harsh\u2019s maker what you checked."));
+      }
+      logLine("handled");
+    });
+  }, []);
   const listRef = useRef(null);
   const [maxFrames, setMaxFrames] = useState(() => lsGet("max", 5));
   const [audio, setAudio] = useState(() => lsGet("audio", false));
@@ -143,7 +191,9 @@ export default function GapQC({ report = () => {} }) {
     setErr(""); setNote(""); setOpen({}); setPhase("checking"); setEditSetup(false);
     const t0 = performance.now();
     try {
-      const r = await call(isAE ? "aeScan" : "prScan", { scope, maxFrames, audio, checks: isAE ? { gaps: true } : checks });
+      if (!isAE) { await logPath(); logLine("check " + new Date().toISOString() + " " + JSON.stringify(checks), true); }
+      const r = await call(isAE ? "aeScan" : "prScan", { scope, maxFrames, audio, checks: isAE ? { gaps: true } : checks, logPath: isAE ? "" : logFile });
+      if (!isAE) logLine("panel done");
       r.gaps.forEach((g) => { g.tc = timecode(g.time, g.fps); if (g.againAt !== undefined) g.againTc = timecode(g.againAt, g.fps); });
       // Black flashes first, then by place in the edit.
       const rank = (g) => (g.kind === "offline" ? 0 : g.black ? 1 : 2);
@@ -218,7 +268,8 @@ export default function GapQC({ report = () => {} }) {
       const a = q.next; q.next = null;
       if (!a) { q.busy = false; return; }
       q.busy = true;
-      call(isAE ? "aeJump" : "prJump", a).catch((e) => setErr(e.message)).then(() => setTimeout(runNext, 60));
+      if (!isAE) logLine("jump " + a.startTicks);
+      call(isAE ? "aeJump" : "prJump", a).then(() => { if (!isAE) logLine("jumped"); }, (e) => { if (!isAE) logLine("jumped"); setErr(e.message); }).then(() => setTimeout(runNext, 60));
     };
     runNext();
   }
@@ -310,6 +361,7 @@ export default function GapQC({ report = () => {} }) {
       )}
 
       <div aria-live="polite">
+        {crashNote && <p className="msg warn">{crashNote} <button className="link-btn" onClick={() => setCrashNote("")}>OK</button></p>}
         {err && <p className="msg bad">{err}</p>}
         {note && <p className="msg good">{note}</p>}
       </div>

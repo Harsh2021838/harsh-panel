@@ -35,6 +35,7 @@
     rmdirSync: function (p) { delete dirs[p]; },
     readFileSync: function (p, enc) { if (!(p in mem)) throw new Error("ENOENT " + p); var v = mem[p]; return enc && typeof v !== "string" ? v.toString(enc) : v; },
     writeFileSync: function (p, d) { mem[p] = String(d); addDir(p.replace(/\/[^\/]*$/, "")); },
+    appendFileSync: function (p, d) { mem[p] = (mem[p] || "") + String(d); addDir(p.replace(/\/[^\/]*$/, "")); },
     copyFileSync: function (a, b) { mem[b] = mem[a] !== undefined ? mem[a] : "x"; addDir(b.replace(/\/[^\/]*$/, "")); },
     renameSync: function (a, b) {
       Object.keys(mem).forEach(function (k) { if (k === a || k.indexOf(a + "/") === 0) { mem[b + k.slice(a.length)] = mem[k]; delete mem[k]; } });
