@@ -62,7 +62,12 @@
         try { d.seq = !!(item.isSequence && item.isSequence()); } catch (e) {}
         if (d.seq) return;
         try { d.media = String(item.getMediaPath() || ""); } catch (e) {}
-        if (a.checks.black && (d.media || /\.aep(\s|$)/i.test(d.name))) { try { d.offline = !!(item.isOffline && item.isOffline()); } catch (e) {} }
+        if (a.checks.black) {
+            // After Effects (Dynamic Link) clips: never call isOffline() (it queries After Effects' link
+            // server); one named like a comp whose media isn't an .aep is unlinked.
+            if (/\.aep(\s|$)/i.test(d.name)) d.offline = !/\.aep$/i.test(d.media);
+            else if (d.media) { try { d.offline = !!(item.isOffline && item.isOffline()); } catch (e) {} }
+        }
         // Only real video files are asked for their frame rate: asking an After Effects comp,
         // a nested sequence or a generator can crash Premiere.
         if (a.checks.rate && VIDEO_FILE.test(d.media)) {

@@ -279,6 +279,14 @@
         return out;
     }
 
+    // Step log: each step is written to disk (open, write, close) before it runs, so if the app
+    // crashes the panel can see where. Path comes from the panel (Tools/Text QC/last-check.log).
+    var LOG = "";
+    function step(name) {
+        if (!LOG) return;
+        try { var f = new File(LOG); f.encoding = "UTF-8"; f.open("a"); f.writeln(name); f.close(); } catch (e) {}
+    }
+
     function mediaPath(pi) {
         try { return pi && pi.getMediaPath ? String(pi.getMediaPath() || "") : ""; } catch (e) { return ""; }
     }
@@ -305,6 +313,8 @@
     //   captions   - caption files imported into the project
     // a.mode: "all" | "active"; a.deep: check every effect, not just graphics
     api.prCollect = function (a) {
+        LOG = a.logPath || "";
+        step("start");
         if (!app.project) throw new Error("No project open.");
         var all = [];
         for (var s = 0; s < app.project.sequences.numSequences; s++) all.push(app.project.sequences[s]);
@@ -325,10 +335,14 @@
             if (done[seq.sequenceID] || depth > 10) return;
             done[seq.sequenceID] = true;
             try { fps[seq.sequenceID] = 254016000000 / Number(seq.timebase); } catch (e) {}
-            for (var t = 0; t < seq.videoTracks.numTracks; t++) {
-                var track = seq.videoTracks[t];
-                for (var c = 0; c < track.clips.numItems; c++) {
-                    var clip = track.clips[c];
+            var vts = seq.videoTracks, nv = vts.numTracks;
+            for (var t = 0; t < nv; t++) {
+                step("read " + seq.name + " V" + (t + 1));
+                // read the collection once: asking for track.clips in the loop builds a new one every time
+                var clipsCol = vts[t].clips, nc = clipsCol.numItems;
+                for (var c = 0; c < nc; c++) {
+                    var clip = clipsCol[c];
+                    if (!clip) continue;
                     var base = {
                         project: projectName, projectPath: projectPath,
                         container: seq.name, containerId: seq.sequenceID, via: via,
@@ -340,14 +354,15 @@
                     var mp = mediaPath(pi);
                     // An After Effects clip: linked (media is an .aep) or unlinked (named "Comp/x.aep"
                     // but offline), so a broken link is reported instead of silently skipped.
-                    var aeName = false, offline = false;
+                    // (No isOffline() here: on a Dynamic Link clip it makes Premiere query After Effects'
+                    // link server, and that is the prime suspect for crashes while reading.)
+                    var aeName = false;
                     try { aeName = /\.aep(\s|$)/i.test(String(pi ? pi.name : clip.name)); } catch (en) {}
-                    if (aeName || /\.aep$/i.test(mp)) { try { offline = !!(pi && pi.isOffline && pi.isOffline()); } catch (eo) {} }
                     if (/\.aep$/i.test(mp) || aeName) {
                         var ae = {};
                         for (var k in base) ae[k] = base[k];
                         ae.aepPath = mp; ae.itemName = pi ? pi.name : clip.name;
-                        ae.offline = offline || !/\.aep$/i.test(mp);
+                        ae.offline = !/\.aep$/i.test(mp); // named like an AE comp but its media isn't an .aep: unlinked
                         try { ae.binPath = String(pi.treePath || ""); ae.nodeId = String(pi.nodeId || ""); } catch (eb) {}
                         ae.key = seq.sequenceID + ":" + t + ":" + c;
                         aeClips.push(ae);
@@ -373,8 +388,11 @@
             }
         }
         for (var i = 0; i < seqs.length; i++) scan(seqs[i], "", 0);
+        step("captions");
+        var caps = captionFiles(app.project.rootItem, [], 0);
+        step("done");
         return { project: projectName, projectPath: projectPath, comps: seqs.length, items: items, aeClips: aeClips,
-            fps: fps, captions: captionFiles(app.project.rootItem, [], 0) };
+            fps: fps, captions: caps };
     };
 
     // Select a project item in the Project panel (by nodeId) so it can be found by hand.

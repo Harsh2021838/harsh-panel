@@ -115,10 +115,23 @@ export default function TextQC({ report = () => {} }) {
   // app went down during one, the log ends on "jump"; then auto Go to is turned off and we say so.
   const [jumpNote, setJumpNote] = useState("");
   const jumpLog = useRef("");
+  const checkLog = useRef("");
   useEffect(() => {
     getPaths().then((p) => {
       const fs = window.require("fs"), path = window.require("path");
       jumpLog.current = path.join(p.work, "last-jump.log");
+      // Did the app go down while reading the project? (jsx writes each step to last-check.log)
+      checkLog.current = path.join(p.work, "last-check.log");
+      try {
+        const lines = fs.readFileSync(checkLog.current, "utf8").trim().split("\n");
+        const lastLine = lines[lines.length - 1] || "";
+        if (lines.length && !/^(done|panel done|handled)/.test(lastLine)) {
+          const at = /^read (.*)$/.exec(lastLine);
+          setJumpNote(hostName + " stopped last time while Text QC was reading the project" + (at ? " (sequence " + at[1] + ")" : "") +
+            ". Try \u201COpen sequence\u201D instead of all sequences, and tell Harsh\u2019s maker this line: " + lastLine);
+        }
+        fs.appendFileSync(checkLog.current, "handled\n");
+      } catch (e) {}
       let last = "";
       try { last = fs.readFileSync(jumpLog.current, "utf8").trim().split("\n").pop(); } catch (e) { return; }
       if (/^jump /.test(last)) {
@@ -185,7 +198,9 @@ export default function TextQC({ report = () => {} }) {
         const r = await waitForApp(host("aeCollect", arg));
         items = r.items; project = r.project;
       } else {
-        const r = await waitForApp(host("prCollect", { mode: scope === "active" ? "active" : "all", deep: !!settings.deep }));
+        try { window.require("fs").writeFileSync(checkLog.current, "check " + new Date().toISOString() + "\n"); } catch (e) {}
+        const r = await waitForApp(host("prCollect", { mode: scope === "active" ? "active" : "all", deep: !!settings.deep, logPath: checkLog.current }));
+        try { window.require("fs").appendFileSync(checkLog.current, "panel done\n"); } catch (e) {}
         setProg({ done: 0, total: 0, label: "Reading After Effects comps and captions\u2026" });
         await sleep(20);
         const x = expandPremiere(r, capFiles);
