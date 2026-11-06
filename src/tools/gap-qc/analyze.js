@@ -52,7 +52,11 @@ export function analyze(dump, opts) {
         ...extra,
       });
       const g = out[out.length - 1];
-      const base = seq.id + ":" + kind + ":" + trackName + ":" + from + ":" + (prev ? prev.i : "") + ":" + (next ? next.i : "");
+      // Identify a problem by the clips involved (name + which part of the source they show), not by
+      // their position or time: fixing something earlier on the track shifts those, and ignored or
+      // corrected problems must stay recognised when you check again.
+      const who = (c) => (c ? c.name + "|" + (c.inPt === null ? "" : Math.round(c.inPt / frame)) : "");
+      const base = seq.id + ":" + kind + ":" + trackName + ":" + who(prev) + ":" + who(next) + ":" + g.frames;
       const n = keys.get(base) || 0;
       keys.set(base, n + 1);
       g.key = n ? base + "#" + n : base;

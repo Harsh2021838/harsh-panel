@@ -12,7 +12,7 @@ import SoundKit from "./tools/sound-kit/SoundKit.jsx";
 import GapQC from "./tools/gap-qc/GapQC.jsx";
 import "./styles.css";
 
-const VERSION = "2.12.2";
+const VERSION = "2.12.3";
 
 // The four sections. Add a tool by putting it in a section's `tools` list
 // (or drop a plugin file into /plugins, see plugins/README.md).

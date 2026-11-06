@@ -54,6 +54,13 @@ const isGap = (g) => !!GAP_KINDS[g.kind];
 const MARKER_COLOR = { start: 1, between: 1, end: 1, cut: 3, flash: 3, sync: 5, blackvideo: 0, offline: 0, subframe: 7, fps: 6, dup: 4 }; // red, orange, purple, green
 
 const KEY = "harsh.gapqc.";
+const REMEMBER_HOURS = 5;
+/** { key: { s: "ignored" | "corrected", t } } still fresh for this scope. */
+function remembered(scope) {
+  const raw = lsGet(scope, {}), out = {};
+  if (raw && !Array.isArray(raw)) for (const k in raw) if (raw[k] && Date.now() - raw[k].t < REMEMBER_HOURS * 3600e3) out[k] = raw[k];
+  return out;
+}
 const lsGet = (k, d) => { try { const v = localStorage.getItem(KEY + k); return v === null ? d : JSON.parse(v); } catch (e) { return d; } };
 const lsSet = (k, v) => { try { localStorage.setItem(KEY + k, JSON.stringify(v)); } catch (e) {} };
 
@@ -215,9 +222,9 @@ export default function GapQC({ report = () => {} }) {
           if (k && k.indexOf(KEY + "ignored:") === 0 && !k.endsWith("@" + r.session)) localStorage.removeItem(k);
         }
       } catch (e) {}
-      const saved = lsGet("ignored:" + r.project + "@" + r.session, []);
+      const saved = remembered("ignored:" + r.project + "@" + r.session);
       const st = {};
-      r.gaps.forEach((g) => { if (saved.indexOf(g.key) !== -1) st[g.key] = "ignored"; });
+      r.gaps.forEach((g) => { if (saved[g.key]) st[g.key] = saved[g.key].s; });
       setState(st);
       setRun({ ...r, ms: performance.now() - t0, at: Date.now() });
       setSel((r.gaps.find((g) => !st[g.key]) || {}).key || null);
@@ -227,10 +234,11 @@ export default function GapQC({ report = () => {} }) {
 
   function setMark(g, v) {
     setState((s) => { const n = { ...s }; if (v) n[g.key] = v; else delete n[g.key]; return n; });
-    if (v === "ignored" || v === null) {
-      const list = lsGet(ignoreScope, []).filter((k) => k !== g.key);
-      if (v) list.push(g.key);
-      lsSet(ignoreScope, list);
+    // Ignore and Corrected are remembered until the app is restarted or REMEMBER_HOURS pass.
+    if (v === "ignored" || v === "corrected" || v === null) {
+      const map = remembered(ignoreScope);
+      if (v) map[g.key] = { s: v, t: Date.now() }; else delete map[g.key];
+      lsSet(ignoreScope, map);
     }
   }
   // Select a row (and go to it). After a row is handled it leaves the list, and the row that

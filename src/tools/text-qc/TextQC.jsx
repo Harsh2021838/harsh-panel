@@ -5,7 +5,7 @@ import { expandPremiere } from "./premiere-sources.js";
 import {
   sleep, fmtSecs, lsGet, lsSet, getPaths, getPathsSync, reportDir, loadDict, addToDict, loadCache, saveCache, resetCache,
   normalize, checkTexts, CATS, CAT_BY_ID, buildGroups, writeReport, findAeps, pathMod, fs, lastError,
-  ignoreKey, loadIgnored, saveIgnored,
+  ignoreKey, loadHandled, saveHandled, REMEMBER_HOURS,
 } from "./engine.js";
 
 const isAE = hostApp === "AEFT";
@@ -102,11 +102,10 @@ export default function TextQC({ report = () => {} }) {
   const fail = (e) => { setErr(e.message || String(e)); setPhase((p) => (p === "done" ? p : "idle")); };
   const mark = (ids, value) => {
     setMarks((m) => { const n = { ...m }; ids.forEach((id) => { if (value) n[id] = value; else delete n[id]; }); return n; });
-    // Remember Ignore (and un-ignore) for this project, so the next check keeps them hidden.
-    if (run && (value === "ignored" || value === null)) {
-      const set = loadIgnored(run.ignoreScope);
-      groups.filter((g) => ids.indexOf(g.id) !== -1).forEach((g) => { if (value) set.add(ignoreKey(g)); else set.delete(ignoreKey(g)); });
-      saveIgnored(run.ignoreScope, set);
+    // Remember Ignore and Corrected (and undo) for this project, so checking again keeps them
+    // hidden, until the app is restarted or REMEMBER_HOURS have passed.
+    if (run && (value === "ignored" || value === "corrected" || value === null)) {
+      saveHandled(run.ignoreScope, groups.filter((g) => ids.indexOf(g.id) !== -1).map(ignoreKey), value);
     }
   };
   const [showIgnored, setShowIgnored] = useState(false);
@@ -211,8 +210,8 @@ export default function TextQC({ report = () => {} }) {
       gs.sort((a, b) => order[a.cat] - order[b.cat] || (a.places[0].time || 0) - (b.places[0].time || 0));
       // Hide what was ignored in earlier checks of this project.
       const ignoreScope = ((items[0] && items[0].projectPath) || project || "*") + "@" + (await appSession());
-      const ignored = loadIgnored(ignoreScope), pre = {};
-      gs.forEach((g) => { if (ignored.has(ignoreKey(g))) pre[g.id] = "ignored"; });
+      const handled = loadHandled(ignoreScope), pre = {};
+      gs.forEach((g) => { const h = handled.get(ignoreKey(g)); if (h) pre[g.id] = h; });
       setMarks(pre); setShowIgnored(false);
       setRun({ host: hostApp, items, unique: uniq.length, cached, failed, batches, ms: performance.now() - t0,
         finished: new Date(), project, cancelled: token.current.cancelled, coverage, warnings, ignoreScope });

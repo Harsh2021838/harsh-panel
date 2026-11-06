@@ -409,19 +409,32 @@ export { sleep, fmtSecs, lsGet, lsSet, getPaths, reportDir, loadDict, addToDict,
   normalize, checkTexts, CATS, CAT_BY_ID, buildGroups, writeReport, findAeps, pathMod, fs };
 export function getPathsSync() { return paths; }
 
-// ------------------------------------------------- remembered "Ignore"s
-// Kept per project, for the current app session only, in Tools/Text QC/ignored.json: a re-check in
-// the same session doesn't bring them back; after restarting Premiere everything is shown again.
+// ------------------------------------- remembered "Ignore"s and "Corrected"s
+// Kept per project in Tools/Text QC/ignored.json as { key: { s: "ignored" | "corrected", t: time } }.
+// A re-check brings none of them back, but only for a while: they are forgotten when the app is
+// restarted (each app session has its own scope, "project@session") or after REMEMBER_HOURS.
+export const REMEMBER_HOURS = 5;
 export function ignoreKey(g) { return [g.cat, g.ruleId, g.bad, normalize(g.text)].join("\u241F"); }
 function ignoredFile() { return pathMod.join(paths.work, "ignored.json"); }
 function readIgnored() { try { return JSON.parse(fs.readFileSync(ignoredFile(), "utf8")); } catch (e) { return {}; } }
-export function loadIgnored(project) { return new Set(readIgnored()[project || "*"] || []); }
-export function saveIgnored(project, set) {
+const fresh = (v) => v && typeof v === "object" && Date.now() - v.t < REMEMBER_HOURS * 3600e3;
+/** Map of key -> "ignored" | "corrected" still remembered for this project and session. */
+export function loadHandled(scope) {
+  const raw = readIgnored()[scope || "*"];
+  const out = new Map();
+  if (raw && !Array.isArray(raw)) for (const k of Object.keys(raw)) if (fresh(raw[k])) out.set(k, raw[k].s);
+  return out;
+}
+/** Remember (state "ignored" / "corrected") or forget (state null) some keys. */
+export function saveHandled(scope, keys, state) {
   const all = readIgnored();
-  // Ignores belong to one app session ("project@session"); drop the ones from earlier sessions.
-  const session = String(project || "").split("@").pop();
-  for (const k of Object.keys(all)) if (k.indexOf("@") !== -1 && k.split("@").pop() !== session) delete all[k];
-  all[project || "*"] = Array.from(set);
+  // Drop other sessions and anything too old.
+  const session = String(scope || "").split("@").pop();
+  for (const k of Object.keys(all)) if (k.indexOf("@") === -1 || k.split("@").pop() !== session) delete all[k];
+  const cur = all[scope || "*"] && !Array.isArray(all[scope || "*"]) ? all[scope || "*"] : {};
+  for (const k of Object.keys(cur)) if (!fresh(cur[k])) delete cur[k];
+  keys.forEach((k) => { if (state) cur[k] = { s: state, t: Date.now() }; else delete cur[k]; });
+  all[scope || "*"] = cur;
   try { fs.writeFileSync(ignoredFile(), JSON.stringify(all), "utf8"); } catch (e) {}
 }
 export function resetCache() { cacheMem = {}; saveCache(); }
