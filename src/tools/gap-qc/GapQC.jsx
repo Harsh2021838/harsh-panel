@@ -2,7 +2,7 @@
 // Premiere also cuts that don't line up across tracks, audio out of sync, and black or offline clips.
 // Host side: jsx/gap-qc.jsx. Each gap is drawn as a tiny timeline so it reads at a glance.
 import React, { useEffect, useRef, useState } from "react";
-import { makeHost, hostApp, nodeRequire } from "../../host.js";
+import { makeHost, hostApp, nodeRequire, appSession } from "../../host.js";
 import { toolDir, lib } from "../../library.js";
 import { Target, Check, Ban, Join } from "../../icons.jsx";
 import { timecode } from "../text-qc/premiere-sources.js";
@@ -179,7 +179,8 @@ export default function GapQC({ report = () => {} }) {
   useEffect(() => { lsSet("max", maxFrames); }, [maxFrames]);
   useEffect(() => { lsSet("audio", audio); }, [audio]);
 
-  const ignoreScope = run ? "ignored:" + run.project : "";
+  // Ignored items last for this Premiere / After Effects session only.
+  const ignoreScope = run ? "ignored:" + run.project + "@" + run.session : "";
   const live = run ? run.gaps.filter((g) => state[g.key] !== "ignored") : [];
   const todo = live.filter((g) => !state[g.key]);
   const gapsTodo = todo.filter(isGap);
@@ -206,7 +207,15 @@ export default function GapQC({ report = () => {} }) {
       // Black flashes first, then by place in the edit.
       const rank = (g) => (g.kind === "offline" ? 0 : g.black ? 1 : 2);
       r.gaps.sort((a, b) => (rank(a) - rank(b)) || (a.container < b.container ? -1 : a.container > b.container ? 1 : a.time - b.time));
-      const saved = lsGet("ignored:" + r.project, []);
+      r.session = await appSession();
+      // forget ignores from earlier sessions
+      try {
+        for (let i = localStorage.length - 1; i >= 0; i--) {
+          const k = localStorage.key(i);
+          if (k && k.indexOf(KEY + "ignored:") === 0 && !k.endsWith("@" + r.session)) localStorage.removeItem(k);
+        }
+      } catch (e) {}
+      const saved = lsGet("ignored:" + r.project + "@" + r.session, []);
       const st = {};
       r.gaps.forEach((g) => { if (saved.indexOf(g.key) !== -1) st[g.key] = "ignored"; });
       setState(st);

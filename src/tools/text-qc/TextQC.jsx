@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import { host, hostApp, pickFiles, pickFolder } from "../../host.js";
+import { host, hostApp, pickFiles, pickFolder, appSession } from "../../host.js";
 import { Gear, Close, Back, Forward, Target } from "../../icons.jsx";
 import { expandPremiere } from "./premiere-sources.js";
 import {
@@ -192,7 +192,7 @@ export default function TextQC({ report = () => {} }) {
       const order = { typo: 0, garbage: 1, grammar: 2, caps: 3, unknown: 4 };
       gs.sort((a, b) => order[a.cat] - order[b.cat] || (a.places[0].time || 0) - (b.places[0].time || 0));
       // Hide what was ignored in earlier checks of this project.
-      const ignoreScope = (items[0] && items[0].projectPath) || project || "*";
+      const ignoreScope = ((items[0] && items[0].projectPath) || project || "*") + "@" + (await appSession());
       const ignored = loadIgnored(ignoreScope), pre = {};
       gs.forEach((g) => { if (ignored.has(ignoreKey(g))) pre[g.id] = "ignored"; });
       setMarks(pre); setShowIgnored(false);

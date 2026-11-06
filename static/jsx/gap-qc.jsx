@@ -62,7 +62,7 @@
         try { d.seq = !!(item.isSequence && item.isSequence()); } catch (e) {}
         if (d.seq) return;
         try { d.media = String(item.getMediaPath() || ""); } catch (e) {}
-        if (a.checks.black && d.media) { try { d.offline = !!(item.isOffline && item.isOffline()); } catch (e) {} }
+        if (a.checks.black && (d.media || /\.aep(\s|$)/i.test(d.name))) { try { d.offline = !!(item.isOffline && item.isOffline()); } catch (e) {} }
         // Only real video files are asked for their frame rate: asking an After Effects comp,
         // a nested sequence or a generator can crash Premiere.
         if (a.checks.rate && VIDEO_FILE.test(d.media)) {

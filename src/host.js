@@ -37,6 +37,19 @@ export function evalRaw(code) {
   return new Promise((resolve) => cep.evalScript(code, resolve));
 }
 
+// The current app session: an id kept in the app's script engine, which lives exactly as long as
+// Premiere / After Effects stays open (it survives panel reloads, not a restart). Things that should
+// only last "for this session", like ignored mistakes, are stored under it.
+let sessionPromise = null;
+const pageSession = String(Date.now());
+export function appSession() {
+  if (!sessionPromise) {
+    sessionPromise = evalRaw("(function(){if(!$.global.__harshSession)$.global.__harshSession=String(new Date().getTime())+String(Math.floor(Math.random()*1e6));return $.global.__harshSession;})()")
+      .then((r) => (/^\d{10,}$/.test(String(r)) ? String(r) : pageSession), () => pageSession);
+  }
+  return sessionPromise;
+}
+
 const loaded = {};
 /** Load an ExtendScript file from <extension>/jsx once per session. */
 function ensureScript(file, globalName) {

@@ -112,7 +112,10 @@ export function expandPremiere(pr, extra) {
     return c ? [c.id] : null;
   };
   const unmatched = new Map(); // aep path -> [{ clip, linkedTo }]
+  const broken = []; // After Effects clips whose text can't be read at all: unlinked, or the .aep is gone
   for (const clip of pr.aeClips || []) {
+    if (clip.offline) { broken.push({ clip, why: "Unlinked: Premiere shows it as Media Offline. Relink it (right-click \u203A Link Media) so its text can be checked." }); continue; }
+    if (!fs.existsSync(clip.aepPath)) { broken.push({ clip, why: "Its After Effects file " + pathMod.basename(clip.aepPath) + " isn\u2019t there any more (moved or renamed?). Relink it." }); continue; }
     const project = readProject(clip.aepPath);
     if (!project) continue;
     const ids = findComps(project, clip);
@@ -159,6 +162,17 @@ export function expandPremiere(pr, extra) {
         " a comp in " + pathMod.basename(file) + ", so its text can\u2019t be tied to the timeline. The rest of " + pathMod.basename(file) +
         " was still checked, without timecodes.",
       clips,
+    });
+  }
+
+  if (broken.length) {
+    warnings.push({
+      text: (broken.length === 1 ? "This After Effects clip couldn\u2019t be checked" : "These " + broken.length + " After Effects clips couldn\u2019t be checked") +
+        " because its link to After Effects is broken:",
+      clips: broken.map(({ clip, why }) => ({
+        ...clip, name: compNameFor(clip), why,
+        tc: timecode(clip.time, fpsOf(clip.containerId)), trackName: "V" + (Number(clip.track) + 1), bin: binOf(clip.binPath),
+      })),
     });
   }
 

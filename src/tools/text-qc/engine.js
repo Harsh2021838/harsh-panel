@@ -410,13 +410,17 @@ export { sleep, fmtSecs, lsGet, lsSet, getPaths, reportDir, loadDict, addToDict,
 export function getPathsSync() { return paths; }
 
 // ------------------------------------------------- remembered "Ignore"s
-// Kept per project in Tools/Text QC/ignored.json so a re-check doesn't bring them back.
+// Kept per project, for the current app session only, in Tools/Text QC/ignored.json: a re-check in
+// the same session doesn't bring them back; after restarting Premiere everything is shown again.
 export function ignoreKey(g) { return [g.cat, g.ruleId, g.bad, normalize(g.text)].join("\u241F"); }
 function ignoredFile() { return pathMod.join(paths.work, "ignored.json"); }
 function readIgnored() { try { return JSON.parse(fs.readFileSync(ignoredFile(), "utf8")); } catch (e) { return {}; } }
 export function loadIgnored(project) { return new Set(readIgnored()[project || "*"] || []); }
 export function saveIgnored(project, set) {
   const all = readIgnored();
+  // Ignores belong to one app session ("project@session"); drop the ones from earlier sessions.
+  const session = String(project || "").split("@").pop();
+  for (const k of Object.keys(all)) if (k.indexOf("@") !== -1 && k.split("@").pop() !== session) delete all[k];
   all[project || "*"] = Array.from(set);
   try { fs.writeFileSync(ignoredFile(), JSON.stringify(all), "utf8"); } catch (e) {}
 }

@@ -338,10 +338,16 @@
                     var pi = null;
                     try { pi = clip.projectItem; } catch (e0) {}
                     var mp = mediaPath(pi);
-                    if (/\.aep$/i.test(mp)) {
+                    // An After Effects clip: linked (media is an .aep) or unlinked (named "Comp/x.aep"
+                    // but offline), so a broken link is reported instead of silently skipped.
+                    var aeName = false, offline = false;
+                    try { aeName = /\.aep(\s|$)/i.test(String(pi ? pi.name : clip.name)); } catch (en) {}
+                    if (aeName || /\.aep$/i.test(mp)) { try { offline = !!(pi && pi.isOffline && pi.isOffline()); } catch (eo) {} }
+                    if (/\.aep$/i.test(mp) || aeName) {
                         var ae = {};
                         for (var k in base) ae[k] = base[k];
                         ae.aepPath = mp; ae.itemName = pi ? pi.name : clip.name;
+                        ae.offline = offline || !/\.aep$/i.test(mp);
                         try { ae.binPath = String(pi.treePath || ""); ae.nodeId = String(pi.nodeId || ""); } catch (eb) {}
                         ae.key = seq.sequenceID + ":" + t + ":" + c;
                         aeClips.push(ae);
