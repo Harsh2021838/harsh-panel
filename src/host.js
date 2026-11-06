@@ -38,8 +38,20 @@ export function asciiScript(code) {
   return String(code).replace(/[\u007f-\uffff]/g, (c) => "\\u" + ("000" + c.charCodeAt(0).toString(16)).slice(-4));
 }
 
+// How many script commands are running in the app right now, and whether any ever ran in this
+// panel load. The updater uses these: it must never reload the panel while a command is still
+// running in Premiere (tearing the panel down mid-command can crash the app).
+let inFlight = 0;
+let hostUsed = false;
+export function hostWasUsed() { return hostUsed; }
+export function hostIdle() {
+  return new Promise((resolve) => { const t = () => (inFlight === 0 ? resolve() : setTimeout(t, 200)); t(); });
+}
+
 export function evalRaw(code) {
-  return new Promise((resolve) => cep.evalScript(asciiScript(code), resolve));
+  hostUsed = true;
+  inFlight++;
+  return new Promise((resolve) => cep.evalScript(asciiScript(code), (r) => { inFlight = Math.max(0, inFlight - 1); resolve(r); }));
 }
 
 // The current app session: an id kept in the app's script engine, which lives exactly as long as

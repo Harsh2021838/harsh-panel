@@ -4,6 +4,7 @@ import { hostApp, hostName, hostBackground, onThemeChange, extensionPath, host }
 import { Wrench, Image, Helix, Check, Proof, Back, Chevron, Gear, Caret, Plus, Wave, GapIcon } from "./icons.jsx";
 import Settings from "./sections/Settings.jsx";
 import { findUpdate, installUpdate, updateMode, downloadUpdate } from "./updater.js";
+import { hostIdle, hostWasUsed } from "./host.js";
 import ClientDNA, { ClientLogo } from "./sections/ClientDNA.jsx";
 import Assets from "./sections/Assets.jsx";
 import { listClients } from "./library.js";
@@ -12,7 +13,7 @@ import SoundKit from "./tools/sound-kit/SoundKit.jsx";
 import GapQC from "./tools/gap-qc/GapQC.jsx";
 import "./styles.css";
 
-const VERSION = "2.12.3";
+const VERSION = "2.12.4";
 
 // The four sections. Add a tool by putting it in a section's `tools` list
 // (or drop a plugin file into /plugins, see plugins/README.md).
@@ -94,16 +95,24 @@ function App() {
   const [update, setUpdate] = useState(null);   // a newer version waiting in the Updates folder
   const [updated, setUpdated] = useState(() => { try { const j = localStorage.getItem("harsh.justUpdated"); localStorage.removeItem("harsh.justUpdated"); return j ? JSON.parse(j) : null; } catch (e) { return null; } });
   const [updating, setUpdating] = useState("");
+  // Install, but only once Premiere has finished every command Harsh sent it: reloading the panel
+  // while a command is still running inside the app can crash it.
   const install = (u) => {
     setUpdating("Installing Harsh " + u.version + "\u2026");
-    setTimeout(() => installUpdate(u, VERSION).then(() => location.reload()).catch((e) => setUpdating("Couldn\u2019t update: " + e.message)), 30);
+    hostIdle()
+      .then(() => installUpdate(u, VERSION))
+      .then(() => hostIdle())
+      .then(() => location.reload())
+      .catch((e) => setUpdating("Couldn\u2019t update: " + e.message));
   };
   useEffect(() => {
-    // Look for a newer version once the panel is up.
-    // Download from the update source (if set), then look in the Updates folder. Again every 4 hours.
+    // Look for a newer version once the panel is up, and again every 4 hours.
+    // "Install automatically" only installs right after the panel opens, before any tool has
+    // talked to Premiere. Found later, while you work, an update is only downloaded and offered
+    // in the bar at the top (or it installs the next time the panel opens).
     const check = () => downloadUpdate(VERSION).catch(() => null)
       .then(() => findUpdate(VERSION))
-      .then((u) => { if (!u) return; if (updateMode() === "auto") install(u); else setUpdate(u); })
+      .then((u) => { if (!u) return; if (updateMode() === "auto" && !hostWasUsed()) install(u); else setUpdate(u); })
       .catch(() => {});
     const t = setTimeout(check, 1500);
     const iv = setInterval(check, 4 * 3600 * 1000);

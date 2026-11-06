@@ -5,6 +5,7 @@ import {
   libraryStats, backupLibrary, exportClient, importClient, looksLikeLibrary, moveLibrary, lib, path,
 } from "../library.js";
 import { forgetPaths } from "../tools/text-qc/engine.js";
+import { hostIdle } from "../host.js";
 import { updateMode, setUpdateMode, findUpdate, inspectUpdate, installUpdate, compareVersions, updatesDir, updateFeed, setUpdateFeed, downloadUpdate, lastChecked } from "../updater.js";
 import { pickFiles } from "../host.js";
 
@@ -48,7 +49,7 @@ export default function Settings({ clients, active, onLibraryChanged, openGuide,
     await new Promise((r) => setTimeout(r, 30));
     const backup = await installUpdate(u, version);
     say("Installed " + u.version + ". The old version is saved in " + backup + ". Reloading\u2026");
-    setTimeout(() => location.reload(), 900);
+    setTimeout(() => hostIdle().then(() => location.reload()), 900); // never reload mid-command
   }
 
   async function move(mode) {
