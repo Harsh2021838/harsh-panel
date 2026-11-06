@@ -14,7 +14,7 @@ import GapQC from "./tools/gap-qc/GapQC.jsx";
 import CompVault from "./tools/comp-vault/CompVault.jsx";
 import "./styles.css";
 
-const VERSION = "2.15.4";
+const VERSION = "2.15.5";
 
 // The four sections. Add a tool by putting it in a section's `tools` list
 // (or drop a plugin file into /plugins, see plugins/README.md).

@@ -1012,7 +1012,7 @@
     preparing[sp.key] = p;
     return p;
   }
-  function schedulePrepare(a) { clearTimeout(prepTimer); prepTimer = setTimeout(function () { prepareDrag(a); }, 80); }
+  function schedulePrepare(a) { clearTimeout(prepTimer); prepTimer = setTimeout(function () { prepareDrag(a); noteDropFor(a); }, 80); }
 
   list.addEventListener('dragstart', function (e) {
     var src = e.target.closest && e.target.closest('[draggable="true"]');
@@ -1035,6 +1035,7 @@
   list.addEventListener('dragend', function () {
     var d = internalDrag; internalDrag = null;
     if (!d) return;
+    noted = { file: '', at: 0 };
     // Frameshift: Premiere may still be importing and placing the clip when the drag ends, so
     // look for it every half second for up to 10 seconds, then colour it (and add keyframes).
     var keys = d.flat ? d.keys : '';
@@ -1071,21 +1072,18 @@
   }
   list.addEventListener('pointerdown', onPress);
   list.addEventListener('mousedown', onPress);
-  // A press on something draggable may become a drag to the timeline. Tell Premiere now, before the
-  // drag starts (during a drag Premiere runs nothing), which project items already use that file,
-  // so afterDrop can tell the dropped clip apart and give it the sound's colour.
-  var dropNoteAt = 0;
-  function noteDrop(e) {
-    if ((e.button || 0) !== 0 || Date.now() - dropNoteAt < 400) return;
-    var src = e.target.closest && e.target.closest('[draggable="true"]');
-    var card = src && src.closest('.card'); if (!card) return;
-    var a = assetById(card.dataset.id);
-    if (!a || !nodeFs || (editing && editing.id === a.id)) return;
-    dropNoteAt = Date.now();
-    host('FrameshiftSK.beforeDrop(' + q(dragSpec(a).file) + ')');
+  // Before a drag can start, tell Premiere which project items already use the file that would be
+  // dragged, so afterDrop can tell the dropped clip apart and give it the sound's colour. Done while
+  // hovering, never on the press itself: talking to Premiere as a drag begins left the panel deaf to
+  // clicks afterwards.
+  var noted = { file: '', at: 0 };
+  function noteDropFor(a) {
+    if (!a || !nodeFs || internalDrag) return;
+    var f = dragSpec(a).file;
+    if (f === noted.file && Date.now() - noted.at < 3000) return;
+    noted = { file: f, at: Date.now() };
+    host('FrameshiftSK.beforeDrop(' + q(f) + ')');
   }
-  list.addEventListener('pointerdown', noteDrop);
-  list.addEventListener('mousedown', noteDrop);
   window.addEventListener('mousemove', function (e) { if (faderMove) faderMove(e); else if (selDrag || (kf && kf.idx != null)) moveTo(e, true); });
   window.addEventListener('mouseup', function (e) { faderMove = null; release(e); });
   window.addEventListener('pointerup', function (e) { faderMove = null; });
@@ -1217,7 +1215,7 @@
   list.addEventListener('pointerover', function (e) {
     var h = e.target.closest('[data-act="drag"]'); if (!h) return;
     var a = assetById(h.closest('.card').dataset.id);
-    if (a) prepareDrag(a);
+    if (a) { prepareDrag(a); noteDropFor(a); }
   });
 
   list.addEventListener('dblclick', function (e) {
