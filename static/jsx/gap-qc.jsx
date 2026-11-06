@@ -38,14 +38,21 @@
     // ================================================================ Premiere
     var TICKS = 254016000000;
     function ticks(t) { return Number(t.ticks); }
-    function clipList(track) {
-        var out = [];
-        for (var c = 0; c < track.clips.numItems; c++) {
-            var clip = track.clips[c], off = false;
+    // Read each track's clips once. Asking Premiere for track.clips inside the loop builds a new
+    // collection every time, which is slow on big projects and can make Premiere run out of memory.
+    // Project items and in points are only read when a check needs them (deep).
+    function clipList(track, deep) {
+        var out = [], clips = null, n = 0;
+        try { clips = track.clips; n = clips.numItems; } catch (e) { return out; }
+        for (var c = 0; c < n; c++) {
+            var clip = clips[c], off = false;
+            if (!clip) continue;
             try { off = !!clip.disabled; } catch (e) {}
             var item = null, node = "", inPt = null;
-            try { item = clip.projectItem; node = item ? String(item.nodeId || item.name) : ""; } catch (e) {}
-            try { inPt = clip.inPoint ? ticks(clip.inPoint) : null; } catch (e) {}
+            if (deep) {
+                try { item = clip.projectItem; node = item ? String(item.nodeId || item.name) : ""; } catch (e) {}
+                try { inPt = clip.inPoint ? ticks(clip.inPoint) : null; } catch (e) {}
+            }
             out.push({ i: c, name: clip.name, start: ticks(clip.start), end: ticks(clip.end), off: off, item: item, node: node, inPt: inPt });
         }
         out.sort(function (a, b) { return a.start - b.start; });
@@ -76,8 +83,12 @@
         if (a.audio) kinds.push(["A", seq.audioTracks]);
         if (!checks.gaps) kinds = [];
         var V = [], A = [];
-        for (var vt = 0; vt < seq.videoTracks.numTracks; vt++) V.push(clipList(seq.videoTracks[vt]));
-        try { for (var at = 0; at < seq.audioTracks.numTracks; at++) A.push(clipList(seq.audioTracks[at])); } catch (e) {}
+        var deep = !!(checks.sync || checks.black || checks.rate || checks.dups);
+        var vts = seq.videoTracks, nv = vts.numTracks;
+        for (var vt = 0; vt < nv; vt++) V.push(clipList(vts[vt], deep));
+        if (checks.sync || a.audio) {
+            try { var ats = seq.audioTracks, na = ats.numTracks; for (var at = 0; at < na; at++) A.push(clipList(ats[at], checks.sync)); } catch (e) {}
+        }
         function issue(kind, track, trackName, from, to, prev, next, extra) {
             var g = { app: "PPRO", container: seq.name, containerId: seq.sequenceID, fps: fps, trackKind: "V", track: track, trackName: trackName,
                 kind: kind, frames: Math.round(Math.abs(to - from) / frame), time: from / TICKS, startTicks: String(from), endTicks: String(to),
@@ -142,7 +153,7 @@
             for (var bt = 0; bt < V.length; bt++) for (var bi = 0; bi < V[bt].length; bi++) {
                 var bc = V[bt][bi], why = "";
                 if (bc.off) continue;
-                try { if (bc.item && bc.item.isOffline && bc.item.isOffline()) why = "offline"; } catch (e) {}
+                try { if (bc.item && !(bc.item.isSequence && bc.item.isSequence()) && bc.item.isOffline && bc.item.isOffline()) why = "offline"; } catch (e) {}
                 if (!why && bc.item && /^black video/i.test(String(bc.item.name))) why = "blackvideo";
                 if (!why) continue;
                 issue(why, bt, "V" + (bt + 1), bc.start, bc.end, bc, null, {});
@@ -166,7 +177,12 @@
                 if (part > 0.05 && part < 0.95) issue("subframe", rt, "V" + (rt + 1), rc.start, rc.start, rc, null, { part: Math.round(part * 100) });
                 if (!rc.item || seenRate[rc.node]) continue;
                 seenRate[rc.node] = true;
-                var rate = 0;
+                // Only ask real video files for their frame rate. Asking an After Effects comp,
+                // a nested sequence or a generator can crash Premiere.
+                var rate = 0, media = "";
+                try { if (rc.item.isSequence && rc.item.isSequence()) continue; } catch (e) { continue; }
+                try { media = String(rc.item.getMediaPath() || ""); } catch (e) { media = ""; }
+                if (!/\.(mp4|mov|mxf|m4v|avi|mts|m2ts|mpg|mpeg|wmv|webm|mkv|r3d|braw|crm|dng|ari|3gp)$/i.test(media)) continue;
                 try { rate = Number(rc.item.getFootageInterpretation().frameRate); } catch (e) {}
                 if (rate > 1000) rate = TICKS / rate;
                 if (rate > 0 && rate < 1000 && Math.abs(rate - fps) > 0.01) issue("fps", rt, "V" + (rt + 1), rc.start, rc.end, rc, null, { rate: Math.round(rate * 100) / 100, seqRate: Math.round(fps * 100) / 100 });

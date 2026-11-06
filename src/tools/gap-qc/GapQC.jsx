@@ -1,15 +1,15 @@
 // Gap QC: finds short gaps that flash black (or flash the layer below) before export, and in
 // Premiere also cuts that don't line up across tracks, audio out of sync, and black or offline clips.
 // Host side: jsx/gap-qc.jsx. Each gap is drawn as a tiny timeline so it reads at a glance.
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { makeHost, hostApp, nodeRequire } from "../../host.js";
 import { toolDir, lib } from "../../library.js";
-import { Target, Forward } from "../../icons.jsx";
+import { Target, Check, Ban, Join } from "../../icons.jsx";
 import { timecode } from "../text-qc/premiere-sources.js";
 
 const call = makeHost("gap-qc.jsx", "HarshGapQC");
 const isAE = hostApp === "AEFT";
-const SCOPES = isAE ? [["active", "Open comp"], ["all", "All comps"]] : [["all", "All sequences"], ["active", "Open sequence"]];
+const SCOPES = isAE ? [["active", "Open comp"], ["all", "All comps"]] : [["active", "Open sequence"], ["all", "All sequences"]];
 const plural = (n, one, many) => n + " " + (n === 1 ? one : many || one + "s");
 // What Premiere can look for. After Effects only looks for gaps.
 const CHECKS = [
@@ -107,7 +107,10 @@ function GapPicture({ g }) {
 }
 
 export default function GapQC({ report = () => {} }) {
-  const [scope, setScope] = useState(() => lsGet("scope", SCOPES[0][0]));
+  const [scope, setScope] = useState(() => lsGet("scope2", SCOPES[0][0]));
+  const [sel, setSel] = useState(null); // key of the selected row
+  const [editSetup, setEditSetup] = useState(false);
+  const listRef = useRef(null);
   const [maxFrames, setMaxFrames] = useState(() => lsGet("max", 5));
   const [audio, setAudio] = useState(() => lsGet("audio", false));
   const [phase, setPhase] = useState("idle"); // idle | checking | done
@@ -122,7 +125,7 @@ export default function GapQC({ report = () => {} }) {
   useEffect(() => { lsSet("checks", checks); }, [checks]);
   useEffect(() => { lsSet("autoGo", autoGo); }, [autoGo]);
 
-  useEffect(() => { lsSet("scope", scope); }, [scope]);
+  useEffect(() => { lsSet("scope2", scope); }, [scope]);
   useEffect(() => { lsSet("max", maxFrames); }, [maxFrames]);
   useEffect(() => { lsSet("audio", audio); }, [audio]);
 
@@ -131,11 +134,13 @@ export default function GapQC({ report = () => {} }) {
   const todo = live.filter((g) => !state[g.key]);
   const gapsTodo = todo.filter(isGap);
   const ignored = run ? run.gaps.filter((g) => state[g.key] === "ignored") : [];
+  const handled = run ? run.gaps.filter((g) => state[g.key] === "fixed" || state[g.key] === "corrected") : [];
+  const current = todo.find((g) => g.key === sel) || null;
   const blacks = todo.filter((g) => g.black).length;
   useEffect(() => { report(phase === "checking" ? { running: true } : run ? { count: todo.length, at: run.at } : null); }, [phase, run, todo.length]);
 
   async function check() {
-    setErr(""); setNote(""); setOpen({}); setPhase("checking");
+    setErr(""); setNote(""); setOpen({}); setPhase("checking"); setEditSetup(false);
     const t0 = performance.now();
     try {
       const r = await call(isAE ? "aeScan" : "prScan", { scope, maxFrames, audio, checks: isAE ? { gaps: true } : checks });
@@ -148,6 +153,7 @@ export default function GapQC({ report = () => {} }) {
       r.gaps.forEach((g) => { if (saved.indexOf(g.key) !== -1) st[g.key] = "ignored"; });
       setState(st);
       setRun({ ...r, ms: performance.now() - t0, at: Date.now() });
+      setSel((r.gaps.find((g) => !st[g.key]) || {}).key || null);
       setPhase("done");
     } catch (e) { setErr(e.message); setPhase(run ? "done" : "idle"); }
   }
@@ -160,16 +166,16 @@ export default function GapQC({ report = () => {} }) {
       lsSet(ignoreScope, list);
     }
   }
-  // After a row is handled, open the next one (and go to it).
-  function next(g) {
-    const rest = todo.filter((x) => x.key !== g.key);
-    const after = rest.find((x) => live.indexOf(x) > live.indexOf(g)) || rest[0];
-    setOpen(after ? { [after.key]: true } : {});
-    if (after && autoGo) jump(after);
+  // Select a row (and go to it). After a row is handled it leaves the list, and the row that
+  // takes its place is selected, so the next one is right under the mouse.
+  function pick(g, go = autoGo) {
+    setSel(g ? g.key : null);
+    if (g && go) jump(g);
   }
-  function openRow(g, isOpen) {
-    setOpen({ ...open, [g.key]: !isOpen });
-    if (!isOpen && autoGo) jump(g);
+  function next(g) {
+    const idx = todo.indexOf(g);
+    const rest = todo.filter((x) => x.key !== g.key);
+    pick(rest[Math.min(idx, rest.length - 1)] || null);
   }
   const done = (g, v) => { setMark(g, v); next(g); };
   async function addMarkers() {
@@ -215,9 +221,44 @@ export default function GapQC({ report = () => {} }) {
     if (failed.length) setErr(plural(failed.length, "gap") + " couldn’t be closed automatically (no extra frames in the clip). Use Go to and close them by hand.");
   }
 
+  // Keys: up/down move, Enter goes to it, C corrected, I ignore, F closes a gap.
+  useEffect(() => {
+    if (!run) return undefined;
+    const onKey = (e) => {
+      if (/input|select|textarea/i.test(e.target.tagName) || e.metaKey || e.ctrlKey || e.altKey) return;
+      if (!listRef.current || !listRef.current.offsetParent) return; // Gap QC isn't on screen
+      const i = todo.indexOf(current), k = e.key.toLowerCase();
+      if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+        e.preventDefault();
+        const n = todo[Math.max(0, Math.min(todo.length - 1, i + (e.key === "ArrowDown" ? 1 : -1)))];
+        if (n) pick(n);
+      } else if (!current) return;
+      else if (e.key === "Enter") jump(current);
+      else if (k === "c") done(current, "corrected");
+      else if (k === "i") done(current, "ignored");
+      else if (k === "f" && isGap(current)) fix(current);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  });
+  useEffect(() => {
+    const el = listRef.current && listRef.current.querySelector(".gap-row.sel");
+    if (el && el.scrollIntoView) el.scrollIntoView({ block: "nearest" });
+  }, [sel]);
+
   const busy = phase === "checking";
   return (
     <div className="tool gap-qc">
+      {run && !editSetup ? (
+        // After a check the settings fold into one line, so the list starts near the top.
+        <div className="setup-line">
+          <span className="grow trunc">
+            {SCOPES.find((o) => o[0] === scope)[1]}{!isAE && ", " + plural(CHECKS.filter(([id]) => checks[id]).length, "check")}, {maxFrames ? "up to " + plural(maxFrames, "frame") : "any length"}
+          </span>
+          <button className="ghost tight" disabled={busy} onClick={() => setEditSetup(true)}>Change</button>
+          <button className="primary tight" disabled={busy} onClick={check}>{busy ? "Checking\u2026" : "Check again"}</button>
+        </div>
+      ) : (
       <div className="controls">
         <div className="seg" role="radiogroup" aria-label="What to check">
           {SCOPES.map(([id, label]) => (
@@ -249,6 +290,7 @@ export default function GapQC({ report = () => {} }) {
 
         <button className="primary" disabled={busy || (!isAE && !CHECKS.some(([id]) => checks[id]))} onClick={check}>{busy ? "Checking\u2026" : run ? "Check again" : isAE ? "Find gaps" : "Check timeline"}</button>
       </div>
+      )}
 
       <div aria-live="polite">
         {err && <p className="msg bad">{err}</p>}
@@ -271,51 +313,62 @@ export default function GapQC({ report = () => {} }) {
               <button className="ghost" onClick={saveReport}>Save report</button>
             </div>
           )}
-          {todo.length > 0 && <label className="check-inline auto-go"><input type="checkbox" checked={autoGo} onChange={() => setAutoGo(!autoGo)} /> Go to each one when I open it</label>}
+          {todo.length > 0 && <label className="check-inline auto-go"><input type="checkbox" checked={autoGo} onChange={() => setAutoGo(!autoGo)} /> Go to the next one automatically</label>}
         </section>
       )}
 
-      {run && live.length > 0 && (
-        <ol className="rows gap-rows">
-          {live.map((g) => {
-            const fixed = !!state[g.key], isOpen = !!open[g.key];
+      {run && todo.length > 0 && (
+        <p className="keys gap-keys"><span><Join size={13} /> close gap <kbd>F</kbd></span><span><Check size={13} /> corrected <kbd>C</kbd></span><span><Ban size={13} /> ignore <kbd>I</kbd></span><span><kbd>&uarr;</kbd><kbd>&darr;</kbd> move</span></p>
+      )}
+      {run && todo.length > 0 && (
+        <ol className="rows gap-list" ref={listRef}>
+          {todo.map((g) => {
+            const on = current === g;
             return (
-              <li key={g.key} className={"row" + (fixed ? " done" : "") + (isOpen ? " open" : "")}>
-                <button className="row-head" aria-expanded={isOpen} onClick={() => openRow(g, isOpen)}>
+              <li key={g.key} className={"gap-row" + (on ? " sel" : "")}>
+                <button className="gap-pick" aria-current={on ? "true" : undefined} onClick={() => pick(g, true)} title="Go to it">
                   <GapPicture g={g} />
                   <span className="row-main">
                     <span className="row-word">
                       {what(g)}
-                      {g.black && !fixed && <span className="tag black">Black</span>}
-                      {g.kind === "offline" && !fixed && <span className="tag black">Offline</span>}
-                      {fixed && <span className="fixed"> {state[g.key] === "fixed" ? "Closed" : "Corrected"}</span>}
+                      {g.black && <span className="tag black">Black</span>}
+                      {g.kind === "offline" && <span className="tag black">Offline</span>}
                     </span>
                     <span className="row-where">
-                      <span className="trunc">{g.container}</span>
-                      {!isAE && <span>{g.trackName}</span>}
                       <span className="num">{g.tc}</span>
+                      {!isAE && <span>{g.trackName}</span>}
+                      {run.containers > 1 && <span className="trunc">{g.container}</span>}
                     </span>
+                    {on && <span className="gap-detail">{detail(g)}</span>}
                   </span>
-                  <Forward size={14} />
                 </button>
-                {isOpen && (
-                  <div className="row-body">
-                    <p className="gap-detail">{detail(g)}</p>
-                    <p className="gap-where"><span className="trunc">{g.container}</span>{!isAE && <span>{g.trackName}</span>}<span className="num">{g.tc}</span></p>
-                    <div className="inline">
-                      <button className="ghost tight" onClick={() => jump(g)}><Target /> Go to</button>
-                      {!fixed && isGap(g) && <button className="ghost tight" onClick={() => fix(g)}>Close gap</button>}
-                      {!fixed && <button className="ghost tight" onClick={() => done(g, "corrected")} title="You fixed it yourself">Corrected</button>}
-                      {!fixed && <button className="ghost tight" onClick={() => done(g, "ignored")}>Ignore</button>}
-                      {state[g.key] === "corrected" && <button className="ghost tight" onClick={() => setMark(g, null)}>Undo</button>}
-                    </div>
-                    {!fixed && isGap(g) && <p className="help">{fixHelp(g)}</p>}
-                  </div>
-                )}
+                <span className="gap-acts">
+                  {isGap(g) && <button className="act" onClick={() => fix(g)} title={fixHelp(g) + " (F)"} aria-label="Close gap"><Join /></button>}
+                  <button className="act good" onClick={() => done(g, "corrected")} title="Corrected: I fixed it (C)" aria-label="Corrected"><Check size={16} /></button>
+                  <button className="act" onClick={() => done(g, "ignored")} title="Ignore (I)" aria-label="Ignore"><Ban /></button>
+                </span>
               </li>
             );
           })}
         </ol>
+      )}
+
+      {handled.length > 0 && (
+        <div className="ignored">
+          <button className="disclose" aria-expanded={!!open.__done} onClick={() => setOpen({ ...open, __done: !open.__done })}>
+            {open.__done ? "Hide done" : plural(handled.length, "done item") + ". Show"}
+          </button>
+          {open.__done && (
+            <ul className="ignored-list">
+              {handled.map((g) => (
+                <li key={g.key}>
+                  <span className="trunc grow"><b>{what(g)}</b> <span className="dim">{state[g.key] === "fixed" ? "closed" : "corrected"}, {g.container} {g.tc}</span></span>
+                  {state[g.key] === "corrected" && <button className="ghost tight" onClick={() => setMark(g, null)}>Undo</button>}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
       )}
 
       {ignored.length > 0 && (

@@ -83,3 +83,9 @@ export const Shapes = ({ size = 22 }) => (
 export const GapIcon = ({ size = 18 }) => (
   <svg {...base(size)}><rect x="2.5" y="8" width="7" height="8" rx="1.5" /><rect x="14.5" y="8" width="7" height="8" rx="1.5" /><path d="M12 5v2M12 11v2M12 17v2" /></svg>
 );
+export const Ban = ({ size = 16 }) => (
+  <svg {...base(size)}><circle cx="12" cy="12" r="8" /><path d="M6.5 17.5l11-11" /></svg>
+);
+export const Join = ({ size = 16 }) => (
+  <svg {...base(size)}><path d="M3 12h6M15 12h6M9 8l3 4-3 4M15 8l-3 4 3 4" /></svg>
+);
