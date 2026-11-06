@@ -33,8 +33,13 @@ export function onThemeChange(fn) {
   try { cep.addEventListener("com.adobe.csxs.events.ThemeColorChanged", fn); } catch (e) {}
 }
 
+/** A script with every non-ASCII character written as \uXXXX (they only ever appear inside string literals). */
+export function asciiScript(code) {
+  return String(code).replace(/[\u007f-\uffff]/g, (c) => "\\u" + ("000" + c.charCodeAt(0).toString(16)).slice(-4));
+}
+
 export function evalRaw(code) {
-  return new Promise((resolve) => cep.evalScript(code, resolve));
+  return new Promise((resolve) => cep.evalScript(asciiScript(code), resolve));
 }
 
 // The current app session: an id kept in the app's script engine, which lives exactly as long as
@@ -50,12 +55,22 @@ export function appSession() {
   return sessionPromise;
 }
 
+/**
+ * JSON for a script command, in plain ASCII. Every character above 0x7E (accents, curly quotes,
+ * emoji, zero-width spaces, U+2028...) is written as a \uXXXX escape, which ExtendScript reads
+ * back as the same text. Sending those characters raw inside evalScript can crash Premiere,
+ * and on-screen text is full of them.
+ */
+export function toScript(value) {
+  return JSON.stringify(value).replace(/[\u007f-\uffff]/g, (c) => "\\u" + ("000" + c.charCodeAt(0).toString(16)).slice(-4));
+}
+
 const loaded = {};
 /** Load an ExtendScript file from <extension>/jsx once per session. */
 function ensureScript(file, globalName) {
   if (loaded[file]) return Promise.resolve();
   const p = extensionPath() + "/jsx/" + file;
-  return evalRaw("$.evalFile(" + JSON.stringify(p) + "); typeof $." + globalName).then((r) => {
+  return evalRaw("$.evalFile(" + toScript(p) + "); typeof $." + globalName).then((r) => {
     if (r !== "object") throw new Error("Couldn't load " + file + " into " + hostName + ". Restart " + hostName + " and try again.");
     loaded[file] = true;
   });
@@ -70,7 +85,7 @@ function ensureScript(file, globalName) {
 export function makeHost(file, globalName) {
   return function (name, arg) {
     return ensureScript(file, globalName)
-      .then(() => evalRaw("$." + globalName + ".call(" + JSON.stringify(name) + "," + JSON.stringify(arg || {}) + ")"))
+      .then(() => evalRaw("$." + globalName + ".call(" + JSON.stringify(name) + "," + toScript(arg || {}) + ")"))
       .then((raw) => {
         let r;
         try { r = JSON.parse(raw); } catch (e) {

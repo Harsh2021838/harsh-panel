@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import { host, hostApp, pickFiles, pickFolder, appSession } from "../../host.js";
+import { host, hostApp, hostName, pickFiles, pickFolder, appSession } from "../../host.js";
 import { Gear, Close, Back, Forward, Target } from "../../icons.jsx";
 import { expandPremiere } from "./premiere-sources.js";
 import {
@@ -112,6 +112,24 @@ export default function TextQC({ report = () => {} }) {
   const [showIgnored, setShowIgnored] = useState(false);
   const [showManual, setShowManual] = useState(false);
   const [autoGo, setAutoGo] = useState(() => lsGet("autoGo", true));
+  // Crash guard: each jump is written to Tools/Text QC/last-jump.log before it's sent. If the
+  // app went down during one, the log ends on "jump"; then auto Go to is turned off and we say so.
+  const [jumpNote, setJumpNote] = useState("");
+  const jumpLog = useRef("");
+  useEffect(() => {
+    getPaths().then((p) => {
+      const fs = window.require("fs"), path = window.require("path");
+      jumpLog.current = path.join(p.work, "last-jump.log");
+      let last = "";
+      try { last = fs.readFileSync(jumpLog.current, "utf8").trim().split("\n").pop(); } catch (e) { return; }
+      if (/^jump /.test(last)) {
+        setAutoGo(false);
+        setJumpNote(hostName + " stopped last time while Text QC was going to a mistake. \u201CGo to\u201D automatically is off for now; use the Go to button.");
+      }
+      try { fs.writeFileSync(jumpLog.current, "ok\n"); } catch (e) {}
+    }).catch(() => {});
+  }, []);
+  const logJump = (line) => { try { if (jumpLog.current) window.require("fs").appendFileSync(jumpLog.current, line + "\n"); } catch (e) {} };
   useEffect(() => { lsSet("autoGo", autoGo); }, [autoGo]);
   const manualRef = useRef(null);
 
@@ -215,7 +233,12 @@ export default function TextQC({ report = () => {} }) {
       const a = q.next; q.next = null;
       if (!a) { q.busy = false; return; }
       q.busy = true;
-      host(isAE ? "aeJump" : "prJump", a).catch(fail).then(() => setTimeout(runNext, 60));
+      // Send only what a jump needs (never the on-screen text), and never let one slow call block the rest.
+      const arg = isAE ? { containerId: a.containerId, layerIndex: a.layerIndex, keyIndex: a.keyIndex, projectPath: a.projectPath }
+        : { containerId: a.containerId, startTicks: a.startTicks };
+      logJump("jump " + JSON.stringify(arg));
+      Promise.race([host(isAE ? "aeJump" : "prJump", arg), new Promise((res) => setTimeout(res, 8000))])
+        .then(() => logJump("ok"), (e) => { logJump("ok"); fail(e); }).then(() => setTimeout(runNext, 60));
     };
     runNext();
   };
@@ -361,6 +384,7 @@ export default function TextQC({ report = () => {} }) {
         </div>
         <label className="check-inline auto-go"><input type="checkbox" checked={autoGo} onChange={() => setAutoGo(!autoGo)} /> Go to each one automatically</label>
         <p className="keys">Keys: <kbd>&larr;</kbd> <kbd>&rarr;</kbd> move{isAE ? <>, <kbd>Enter</kbd> use the first suggestion</> : null}, <kbd>G</kbd> go to, <kbd>C</kbd> corrected, <kbd>I</kbd> ignore, <kbd>Esc</kbd> close.</p>
+        {jumpNote && <p className="msg warn">{jumpNote} <button className="link-btn" onClick={() => setJumpNote("")}>OK</button></p>}
         {err && <p className="msg bad">{err}</p>}
         {note && <p className="msg good">{note}</p>}
       </div>
@@ -452,6 +476,7 @@ export default function TextQC({ report = () => {} }) {
       </div>
 
       <div aria-live="polite">
+        {jumpNote && <p className="msg warn">{jumpNote} <button className="link-btn" onClick={() => setJumpNote("")}>OK</button></p>}
         {err && <p className="msg bad">{err}</p>}
         {note && <p className="msg good">{note}</p>}
       </div>

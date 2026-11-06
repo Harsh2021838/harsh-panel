@@ -6,7 +6,7 @@
 // Premiere the first time the tool opens. Its library lives in
 // <Harsh Library>/Tools/Sound Kit/library.json (copied once from Documents/ClientSoundKit).
 import { useEffect, useRef, useState } from "react";
-import { nodeRequire, extensionPath, evalRaw, hostName } from "../../host.js";
+import { nodeRequire, extensionPath, evalRaw, hostName, asciiScript } from "../../host.js";
 import { toolDir } from "../../library.js";
 import source from "./vendor/main.js.txt";
 import css from "./vendor/style.css.txt";
@@ -108,7 +108,11 @@ function run(shadow, root, dir) {
     removeEventListener: (...a) => root.removeEventListener(...a),
   };
   const win = {
-    require: window.require, cep: window.cep, __adobe_cep__: window.__adobe_cep__,
+    require: window.require, cep: window.cep,
+    // Same protection as the rest of Harsh: script commands go to Premiere in plain ASCII.
+    __adobe_cep__: window.__adobe_cep__ && Object.assign(Object.create(window.__adobe_cep__), {
+      evalScript: (code, cb) => window.__adobe_cep__.evalScript(asciiScript(code), cb),
+    }),
     AudioContext: window.AudioContext, webkitAudioContext: window.webkitAudioContext,
     ResizeObserver: window.ResizeObserver, localStorage: window.localStorage,
     get devicePixelRatio() { return window.devicePixelRatio; },
