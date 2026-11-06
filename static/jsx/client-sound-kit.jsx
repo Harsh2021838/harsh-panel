@@ -353,22 +353,29 @@ var CSK = (function () {
             } catch (e) { return "ERR|" + e.message; }
         },
 
-        // After a file is dragged from the panel onto the timeline: give it the sound's colour.
-        afterDrop: function (path, colorIndex) {
+        // After a file is dragged from the panel onto the timeline: give it the sound's colour, and
+        // for a BGM part dragged as clean audio, put its volume keyframes on the clip ("t:db;t:db").
+        // Returns "OK|<clips found>"; the panel calls again until the clip has landed.
+        afterDrop: function (path, colorIndex, keysStr, mode) {
             try {
-                var target = norm(path), n = 0, i, j;
+                var target = norm(path), n = 0, i, j, keys = parseKeys(keysStr || "");
                 var item = findItemByPath(app.project.rootItem, target);
                 if (item && colorIndex >= 0) { try { item.setColorLabel(colorIndex); } catch (e1) {} }
                 var seq = app.project.activeSequence;
                 if (seq) {
-                    for (i = 0; i < seq.audioTracks.numTracks; i++) {
-                        var tr = seq.audioTracks[i];
-                        for (j = 0; j < tr.clips.numItems; j++) {
-                            var c = tr.clips[j];
+                    var ats = seq.audioTracks, na = ats.numTracks;
+                    for (i = 0; i < na; i++) {
+                        var clips = ats[i].clips, nc = clips.numItems;
+                        for (j = 0; j < nc; j++) {
+                            var c = clips[j];
                             try {
-                                if (c.projectItem && norm(c.projectItem.getMediaPath()) === target) {
-                                    n++;
-                                    if (colorIndex >= 0 && c.setColorLabel) c.setColorLabel(colorIndex);
+                                if (!c.projectItem || norm(c.projectItem.getMediaPath()) !== target) continue;
+                                n++;
+                                if (colorIndex >= 0 && c.setColorLabel) { try { c.setColorLabel(colorIndex); } catch (e3) {} }
+                                if (keys.length) {
+                                    var level = getLevelParam(c), varying = false;
+                                    try { varying = level && level.isTimeVarying(); } catch (e4) {}
+                                    if (level && !varying) applyKeys(c, keys, mode === "seq" ? "seq" : "media");
                                 }
                             } catch (e2) {}
                         }

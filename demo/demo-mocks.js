@@ -49,6 +49,9 @@
       return children(d);
     },
     lstatSync: function (p) { return fs.statSync(p); },
+    openSync: function (p) { return p; },
+    closeSync: function () {},
+    readSync: function (fd, buf, off, len, pos) { var v = String(mem[fd] || ""); for (var i = 0; i < len; i++) buf[off + i] = v.charCodeAt(pos + i) & 255 || 0; return len; },
     rmSync: function (p) { Object.keys(mem).forEach(function (k) { if (k === p || k.indexOf(p + "/") === 0) delete mem[k]; }); Object.keys(dirs).forEach(function (k) { if (k === p || k.indexOf(p + "/") === 0) delete dirs[k]; }); },
     unlinkSync: function (p) { delete mem[p]; }
   };

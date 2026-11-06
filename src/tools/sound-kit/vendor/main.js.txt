@@ -393,6 +393,8 @@
     return '' +
       '<div class="edit">' +
         '<div class="erow"><label>Name</label><input data-f="name" value="' + esc(d.name) + '"></div>' +
+        '<div class="erow realfile"><label>File</label><span class="cname" title="' + esc(d.path) + '">' + esc(baseFile(d.path)) + '</span>' +
+          '<button class="mini" data-act="reveal">Show in ' + (IS_WIN ? 'Explorer' : 'Finder') + '</button></div>' +
         parts + vol +
         '<div class="erow"><label>Track</label><select data-f="track">' + trackOptions(d.track) + '</select></div>' +
         '<div class="erow"><label>Clip colour <span class="cname" data-role="cname">' + LABELS[d.color].name + '</span></label><div class="swatches">' + swatches + '</div></div>' +
@@ -441,7 +443,7 @@
       '<div class="card ' + v.kind + (missing ? ' missing' : '') + (isEdit ? ' editing' : '') + '" data-id="' + a.id + '" style="--c:' + col + '">' +
         '<div class="card-top">' +
           '<span class="dot" data-role="dot" title="' + LABELS[v.color].name + '"></span>' +
-          '<span class="name" data-role="name" title="' + esc(v.name) + '">' + esc(v.name) + '</span>' +
+          '<span class="name" data-role="name" title="' + esc(v.name + (baseFile(a.path) !== v.name ? '  (file: ' + baseFile(a.path) + ')' : '')) + '">' + esc(v.name) + '</span>' +
           '<span class="badge" data-role="vol" title="Saved volume">' + volLabel(v) + '</span>' +
           '<span class="badge" data-role="track" title="Track">' + trackLabel(v.track) + '</span>' +
           (isEdit ? '' : '<button class="icon edit-btn" data-act="edit" title="Edit this sound" aria-label="Edit ' + esc(v.name) + '">✎</button>') +
@@ -683,6 +685,8 @@
     var a = assetById(editing.id), d = editing.draft;
     if (d.kind === 'part') {
       if (!(d.out > d.in)) { setStatus('The part’s end must be after its start.', 'err'); return; }
+      var dupE = duplicateOf('part', d.path, d.in, d.out, d.id);
+      if (dupE) { setStatus(dupMessage(dupE) + ' Change From/To so this part covers different seconds.', 'err'); return; }
       d.keys = d.keys.map(function (k) { return [clamp(Number(k[0]) || 0, 0, partLen(d)), clamp(Number(k[1]) || 0, MIN_DB, MAX_DB)]; })
         .sort(function (p, q2) { return p[0] - q2[0]; });
     }
@@ -797,8 +801,14 @@
   function addFiles(paths) {
     paths = paths.filter(function (p) { return p && AUDIO_EXT.test(p); });
     if (!paths.length) { setStatus('No audio files found. Supported: wav, mp3, aif, m4a, aac, flac, ogg.', 'err'); return; }
-    var kind = lib.activeKind, added = [];
-    paths.forEach(function (p) { var a = newAsset(kind, p); client().assets.push(a); added.push(a); });
+    var kind = lib.activeKind, added = [], skipped = [];
+    paths.forEach(function (p) {
+      var dup = kind !== 'part' ? duplicateOf(kind, p) : null;
+      if (!dup) dup = added.filter(function (x) { return sameAudio(x.path, p); })[0] && { kind: kind, name: baseName(p) };
+      if (dup) { skipped.push(dup); return; }
+      var a = newAsset(kind, p); client().assets.push(a); added.push(a);
+    });
+    if (!added.length) { setStatus(skipped.length === 1 ? dupMessage(skipped[0]) : 'All ' + skipped.length + ' were already in ' + KIND_NAME[kind] + '.', 'err'); return; }
     save();
     added.forEach(function (a) { ensureAnalysis(a).then(function () { afterAssetChange(a); }); });
     if (kind === 'part' && added.length === 1) {
@@ -806,7 +816,7 @@
       setStatus('Set which seconds of the file to use and its volume shape, then Save.', 'ok');
     } else {
       renderList();
-      setStatus('Added ' + paths.length + ' sound' + (paths.length > 1 ? 's' : '') + '. Press ✎ on a sound to set its level, track and colour.', 'ok');
+      setStatus('Added ' + added.length + ' sound' + (added.length > 1 ? 's' : '') + (skipped.length ? ' (' + skipped.length + ' already there, skipped)' : '') + '. Press ✎ on a sound to set its level, track and colour.', 'ok');
     }
   }
 
@@ -824,6 +834,8 @@
   function captureFromTimeline() {
     setStatus('Reading the selected clip…');
     hostJson('CSK.captureSelected()').then(function (c) {
+      var dupC = duplicateOf('part', c.path, c.inS, c.outS);
+      if (dupC) { setStatus(dupMessage(dupC), 'err'); return; }
       var tag = guessTag(c);
       var a = newAsset('part', c.path, {
         name: baseName(c.path) + ' ' + fmtClock(c.inS) + '–' + fmtClock(c.outS),
@@ -911,11 +923,14 @@
       if (beats && beats < total) label = beats + (beats === 1 ? ' beat' : ' beats');
     } else if (a.kind === 'part') { from = a.in; to = a.out; }
     else if (bgmSel[a.id]) { from = bgmSel[a.id].a; to = bgmSel[a.id].b; label = clockTag(from) + '-' + clockTag(to); }
-    var vol = a.kind === 'part' && a.keys.length ? a.keys.map(function (k) { return k[0] + ':' + k[1]; }).join(';') : String(a.db);
+    // Frameshift: a BGM part with keyframes is dragged as clean audio (0 dB); after the drop the
+    // keyframes are put on the clip itself (afterDrop), so they show and can be moved in Premiere.
+    var flat = a.kind === 'part' && a.keys.length > 0;
+    var vol = flat ? 'flat' : String(a.db);
     var key = [a.path, a.kind, from.toFixed(3), to.toFixed(3), vol, a.bakedDb || 0].join('|');
     if (a.kind === 'part') label = (label ? label + ' ' : '') + hashStr(key);
-    var file = nodePath.join(renderDir(), safeName(a.name) + ' [' + volTag(a) + ']' + (label ? ' ' + label : '') + '.wav');
-    return { key: key, from: from, to: to, label: a.kind === 'part' ? '' : label, file: file };
+    var file = nodePath.join(renderDir(), safeName(a.name) + ' [' + (flat ? 'keys' : volTag(a)) + ']' + (label ? ' ' + label : '') + '.wav');
+    return { key: key, from: from, to: to, label: a.kind === 'part' ? '' : label, file: file, flat: flat };
   }
   function prepareDrag(a) {
     if (!nodeFs || !a.wave || a.wave.error || !fileExists(a.path)) return Promise.resolve(null);
@@ -923,7 +938,7 @@
     if (prepared[sp.key] && nodeFs.existsSync(prepared[sp.key])) return Promise.resolve(prepared[sp.key]);
     if (preparing[sp.key]) return preparing[sp.key];
     var p = decode(a.path).then(function (buf) {
-      var r = renderRange(a, buf, sp.from, sp.to);
+      var r = renderRange(sp.flat ? Object.assign({}, a, { keys: [], db: 0, bakedDb: 0 }) : a, buf, sp.from, sp.to);
       mkdirp(renderDir());
       nodeFs.writeFileSync(sp.file, new Uint8Array(encodeWav(r.chs, r.sr, r.useFloat)));
       prepared[sp.key] = sp.file;
@@ -951,24 +966,26 @@
     }
     e.dataTransfer.effectAllowed = 'copy';
     e.dataTransfer.setData('com.adobe.cep.dnd.file.0', file);
-    internalDrag = { file: file, a: a, label: sp.label };
-    setStatus('Drop it on the timeline. The volume is already in the file.');
+    internalDrag = { file: file, a: a, label: sp.label, flat: sp.flat };
+    setStatus(sp.flat ? 'Drop it on the timeline. Its volume keyframes are added to the clip once it lands.' : 'Drop it on the timeline. The volume is already in the file.');
   });
   list.addEventListener('dragend', function () {
     var d = internalDrag; internalDrag = null;
     if (!d) return;
-    var told = false;
-    [400, 1500].forEach(function (ms) {
-      setTimeout(function () {
-        host('CSK.afterDrop(' + q(d.file) + ',' + Number(d.a.color) + ')').then(function (r) {
-          if (!told && r.indexOf('OK|') === 0 && Number(r.slice(3)) > 0) {
-            told = true;
-            setStatus('Dropped ' + d.a.name + (d.label ? ' (' + d.label + ')' : '') + ' at ' + volLabel(d.a) +
-              ', coloured ' + LABELS[d.a.color].name + '.', 'ok');
-          }
-        });
-      }, ms);
-    });
+    // Frameshift: Premiere may still be importing and placing the clip when the drag ends, so
+    // look for it every half second for up to 10 seconds, then colour it (and add keyframes).
+    var keys = d.flat ? d.a.keys.map(function (k) { return Number(k[0]) + ':' + Number(k[1]); }).join(';') : '';
+    var tries = 0;
+    (function look() {
+      tries++;
+      host('CSK.afterDrop(' + q(d.file) + ',' + Number(d.a.color) + ',' + q(keys) + ',' + q(d.a.mode || 'media') + ')').then(function (r) {
+        if (r.indexOf('OK|') === 0 && Number(r.split('|')[1]) > 0) {
+          setStatus('Dropped ' + d.a.name + (d.label ? ' (' + d.label + ')' : '') + ', coloured ' + LABELS[d.a.color].name +
+            (keys ? ', with its ' + d.a.keys.length + ' volume keyframes' : ' at ' + volLabel(d.a)) + '.', 'ok');
+        } else if (tries < 20) setTimeout(look, 500);
+        else if (r.indexOf('ERR|') === 0) setStatus('Dropped, but couldn\u2019t colour it: ' + r.slice(4), 'err');
+      });
+    })();
   });
 
   // ----- BGM section selection -----
@@ -1116,6 +1133,8 @@
 
   function saveSelectionAsPart(a) {
     var r = bgmSel[a.id]; if (!r) return;
+    var dupS = duplicateOf('part', a.path, r.a, r.b);
+    if (dupS) { setStatus(dupMessage(dupS), 'err'); return; }
     var p = newAsset('part', a.path, {
       name: a.name + ' ' + fmtClock(r.a) + '–' + fmtClock(r.b),
       in: r2(r.a), out: r2(r.b), keys: [], db: a.db, track: a.track, tag: 'middle', color: tagOf('middle').color
@@ -1183,6 +1202,7 @@
       refreshKeyRows(card);
     }
     else if (act === 'preview') { var pd = d || a; preview(pd, pd.kind === 'part' ? pd.in : 0, pd.kind === 'part' ? pd.out : 0, btn); }
+    else if (act === 'reveal') { if (d && d.path) revealFile(d.path); }
     else if (act === 'relink') {
       pickFiles(false).then(function (paths) {
         if (!paths[0]) return;
@@ -1945,6 +1965,49 @@
     view = on ? 'settings' : 'sounds';
     renderAll();
   }
+  // Frameshift: the real file name (with extension), shown next to the custom name.
+  var IS_WIN = (function () { try { return window.require('os').platform() === 'win32'; } catch (e) { return /Win/.test(navigator.platform || ''); } })();
+  function baseFile(p) { return String(p || '').split(/[\\\/]/).pop(); }
+  function revealFile(p) {
+    try {
+      var cp = window.require('child_process');
+      if (IS_WIN) cp.exec('explorer /select,"' + p + '"'); else cp.exec('open -R "' + p.replace(/"/g, '\\"') + '"');
+    } catch (err) { setStatus(p); }
+  }
+
+  // Frameshift: no duplicates. The same file (or an identical copy under another name) can be in
+  // SFX or full BGM once; BGM parts may come from one song, but not cover almost the same seconds.
+  function sameAudio(p1, p2) {
+    if (!p1 || !p2) return false;
+    if (nodePath.resolve(p1).toLowerCase() === nodePath.resolve(p2).toLowerCase()) return true;
+    try {
+      var s1 = nodeFs.statSync(p1), s2 = nodeFs.statSync(p2);
+      if (s1.size !== s2.size) return false;
+      var B = window.require('buffer').Buffer, n = Math.min(65536, s1.size), b1 = B.alloc(n), b2 = B.alloc(n), f1 = nodeFs.openSync(p1, 'r'), f2 = nodeFs.openSync(p2, 'r');
+      try {
+        nodeFs.readSync(f1, b1, 0, n, 0); nodeFs.readSync(f2, b2, 0, n, 0);
+        if (!b1.equals(b2)) return false;
+        nodeFs.readSync(f1, b1, 0, n, Math.max(0, s1.size - n)); nodeFs.readSync(f2, b2, 0, n, Math.max(0, s2.size - n));
+        return b1.equals(b2);
+      } finally { nodeFs.closeSync(f1); nodeFs.closeSync(f2); }
+    } catch (e) { return false; }
+  }
+  var KIND_NAME = { sfx: 'SFX', bgm: 'Full BGM', part: 'BGM parts' };
+  function duplicateOf(kind, path, inS, outS, exceptId) {
+    var list = client().assets;
+    for (var i = 0; i < list.length; i++) {
+      var o = list[i];
+      if (o.kind !== kind || o.id === exceptId || !sameAudio(o.path, path)) continue;
+      if (kind !== 'part') return o;
+      var ov = Math.min(o.out, outS) - Math.max(o.in, inS), shorter = Math.min(o.out - o.in, outS - inS);
+      if (shorter > 0 && ov / shorter >= 0.9) return o;
+    }
+    return null;
+  }
+  function dupMessage(o) {
+    return 'Already in ' + KIND_NAME[o.kind] + ' as \u201C' + o.name + '\u201D' + (o.kind === 'part' ? ' (' + fmtClock(o.in) + '\u2013' + fmtClock(o.out) + ')' : '') + '.';
+  }
+
   function openPath(p) {
     try {
       if (!nodeFs.existsSync(p)) mkdirp(p);
@@ -2122,11 +2185,22 @@
     for (var i = 0; i < e.dataTransfer.files.length; i++) {
       var f = e.dataTransfer.files[i]; if (f.path) paths.push(f.path);
     }
+    // Frameshift: Premiere's panel browser may not give File.path; the uri list has every file.
+    if (!paths.length) {
+      var uris = (e.dataTransfer.getData('text/uri-list') || e.dataTransfer.getData('text/plain') || '').split(/\r?\n/);
+      uris.forEach(function (u) {
+        u = u.trim();
+        if (!u || u.charAt(0) === '#' || !/^file:/i.test(u)) return;
+        var pth = decodeURIComponent(u.replace(/^file:\/\/(localhost)?/i, ''));
+        if (/^\/[A-Za-z]:\//.test(pth)) pth = pth.slice(1);
+        paths.push(pth);
+      });
+    }
     if (paths.length) addFiles(paths);
     else setStatus('Couldn’t read dropped files here. Use Add sounds instead.', 'err');
   });
 
-  window.__cskTest = { encodeWav: encodeWav, renderRange: renderRange, decode: decode, dragSpec: dragSpec, prepareDrag: prepareDrag,
+  window.__cskTest = { duplicateOf: duplicateOf, encodeWav: encodeWav, renderRange: renderRange, decode: decode, dragSpec: dragSpec, prepareDrag: prepareDrag,
     bandProfile: bandProfile, measure: measure, importFromDir: importFromDir, runSyncAll: runSyncAll,
     lib: function () { return lib; }, check: function () { return check; }, bgmSel: function () { return bgmSel; } };
 

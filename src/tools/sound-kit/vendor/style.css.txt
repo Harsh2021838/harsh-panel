@@ -249,3 +249,9 @@ button:focus-visible, input:focus-visible, select:focus-visible, [tabindex]:focu
 .bgm-go { display: flex; gap: 6px; }
 .bgm-go .drag-handle { flex: 1; justify-content: center; height: 28px; }
 .bgm-go .place { height: 28px; min-width: 96px; }
+
+/* Frameshift: the real file name under the custom name */
+.edit .erow.realfile { display: flex; flex-direction: row; align-items: center; justify-content: flex-start; gap: 8px; text-align: left; margin-top: -4px; }
+.edit .erow.realfile label { flex: none; width: auto; margin: 0; }
+.edit .erow.realfile .cname { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; color: var(--muted); }
+.edit .erow.realfile .mini { flex: none; }
