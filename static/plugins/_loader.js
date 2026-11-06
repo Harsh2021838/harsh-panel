@@ -34,7 +34,9 @@
 
   try {
     H.require("fs").readdirSync(H.pluginDir)
-      .filter(function (n) { return /\.js$/i.test(n) && n.charAt(0) !== "_"; })
+      // library.js was the "Harsh Library" plugin; it's built in now as Tools > Comp Vault.
+      // Loading the old copy too would add a second tool and clash with Harsh's own scripts.
+      .filter(function (n) { return /\.js$/i.test(n) && n.charAt(0) !== "_" && n.toLowerCase() !== "library.js"; })
       .sort()
       .forEach(function (n) { document.write('<script src="../plugins/' + encodeURIComponent(n) + '"><\/script>'); });
   } catch (e) { console.error("Harsh: could not list plugins", e); }

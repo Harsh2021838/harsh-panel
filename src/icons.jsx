@@ -89,3 +89,6 @@ export const Ban = ({ size = 16 }) => (
 export const Join = ({ size = 16 }) => (
   <svg {...base(size)}><path d="M3 12h6M15 12h6M9 8l3 4-3 4M15 8l-3 4 3 4" /></svg>
 );
+export const VaultIcon = ({ size = 18 }) => (
+  <svg {...base(size)}><rect x="3.5" y="4.5" width="17" height="15" rx="2.5" /><circle cx="12" cy="12" r="3.2" /><path d="M12 8.8v-1M15.2 12h1M12 15.2v1M8.8 12h-1M6.5 19.5v1.5M17.5 19.5v1.5" /></svg>
+);

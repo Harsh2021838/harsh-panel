@@ -1,0 +1,1 @@
+{ "type": "commonjs", "private": true, "description": "Comp Vault source: CommonJS, bundled into the panel by esbuild. Tests: node --test test/*.test.js" }

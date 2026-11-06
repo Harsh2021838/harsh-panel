@@ -45,8 +45,12 @@
     statSync: function (p) { var d = !!dirs[p]; return { isDirectory: function () { return d; }, size: d ? 0 : String(mem[p] || "").length, mtimeMs: 0 }; },
     readdirSync: function (d, o) {
       if (o && o.withFileTypes && /Projects$/.test(d)) return ["Brightline_GFX.aep", "Brightline_GFX_v2.aep"].map(function (n) { return { name: n, isDirectory: function () { return false; } }; });
+      if (o && o.withFileTypes) return children(d).map(function (n) { var full = d.replace(/\/$/, "") + "/" + n; return { name: n, isDirectory: function () { return !!dirs[full]; }, isFile: function () { return !dirs[full]; } }; });
       return children(d);
-    }
+    },
+    lstatSync: function (p) { return fs.statSync(p); },
+    rmSync: function (p) { Object.keys(mem).forEach(function (k) { if (k === p || k.indexOf(p + "/") === 0) delete mem[k]; }); Object.keys(dirs).forEach(function (k) { if (k === p || k.indexOf(p + "/") === 0) delete dirs[k]; }); },
+    unlinkSync: function (p) { delete mem[p]; }
   };
   window.__demoFs = fs; window.__demoMem = mem; // lets tests add files
   // Show sample SVGs as images.
@@ -54,7 +58,11 @@
   mem["/Users/harsh/Projects/Brightline_GFX_v2.aep"] = mem["/Users/harsh/Projects/Brightline/Brightline_GFX.aep"];
   var path = {
     join: function () { return Array.prototype.join.call(arguments, "/").replace(/\/+/g, "/"); },
-    basename: function (p) { return String(p).split(/[\\/]/).pop(); }
+    basename: function (p, ext) { var b = String(p).split(/[\\/]/).pop(); return ext && b.slice(-ext.length) === ext ? b.slice(0, -ext.length) : b; },
+    dirname: function (p) { return String(p).replace(/\/[^\/]*$/, "") || "/"; },
+    extname: function (p) { var m = /\.[^.\/]*$/.exec(String(p)); return m ? m[0] : ""; },
+    resolve: function (p) { return String(p).replace(/\/+$/, ""); },
+    sep: "/"
   };
 
   // --------------------------------------------------- fake spelling server
