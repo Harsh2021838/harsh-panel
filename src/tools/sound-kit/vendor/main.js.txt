@@ -869,32 +869,101 @@
     });
     return out;
   }
+  // Frameshift: selected clips that are pieces of one song lying one after another on the timeline
+  // (an edited ending, a song with a section cut out) are one BGM part. Other clips are their own parts.
+  function groupCaptured(list) {
+    var groups = [];
+    list.slice().sort(function (x, y) { return x.start - y.start; }).forEach(function (c) {
+      var g = null;
+      for (var i = groups.length - 1; i >= 0; i--) {
+        var last = groups[i][groups[i].length - 1];
+        if (last.path === c.path && c.start - last.end < 1.0 && c.start >= last.start) { g = groups[i]; break; }
+      }
+      if (g) g.push(c); else groups.push([c]);
+    });
+    return groups;
+  }
+  function cleanKeys(keys) {
+    keys.sort(function (x, y) { return x[0] - y[0]; });
+    var out = [];
+    keys.forEach(function (k) {
+      var t = Math.round(k[0] * 1000) / 1000, prev = out[out.length - 1];
+      if (prev && Math.abs(t - prev[0]) < 0.01) {
+        if (Math.abs(k[1] - prev[1]) < 0.05) return;  // the same point twice
+        t = prev[0] + 0.01;                            // a jump in level: keep both, just apart
+      }
+      out.push([t, Math.round(k[1] * 100) / 100]);
+    });
+    return out;
+  }
+  // Keys of every clip of a group on one time line starting at the group's first clip. A clip
+  // without keyframes keeps its fixed level as two keys.
+  function groupKeys(g) {
+    var keys = [];
+    g.forEach(function (c) {
+      var off = c.start - g[0].start, len = c.end - c.start;
+      var ks = c.keys && c.keys.length ? c.keys : [[0, c.db], [len, c.db]];
+      ks.forEach(function (k) { if (k[0] >= -0.001 && k[0] <= len + 0.001) keys.push([off + Math.max(0, Math.min(len, k[0])), k[1]]); });
+    });
+    return cleanKeys(keys);
+  }
+  // The pieces as one WAV: each piece where it sits on the timeline, at full level (the volume is
+  // in the keyframes). Same pieces, same file name, so saving them again is caught as a duplicate.
+  function renderGroup(g) {
+    return decode(g[0].path).then(function (buf) {
+      var sr = buf.sampleRate, nCh = buf.numberOfChannels, total = 0, c, i;
+      g.forEach(function (x) { total = Math.max(total, x.end - g[0].start); });
+      var n = Math.max(1, Math.round(total * sr)), chs = [], peak = 0;
+      for (c = 0; c < nCh; c++) chs.push(new Float32Array(n));
+      g.forEach(function (x) {
+        var d0 = Math.round((x.start - g[0].start) * sr), s0 = Math.round(x.inS * sr), len = Math.round((x.end - x.start) * sr);
+        for (c = 0; c < nCh; c++) {
+          var src = buf.getChannelData(c), dst = chs[c];
+          for (i = 0; i < len && d0 + i < n && s0 + i < src.length; i++) { var v = src[s0 + i]; dst[d0 + i] = v; if (v > peak) peak = v; else if (-v > peak) peak = -v; }
+        }
+      });
+      var sig = g.map(function (x) { return x.inS.toFixed(2) + '-' + x.outS.toFixed(2) + '@' + (x.start - g[0].start).toFixed(2); }).join(',');
+      var dir = nodePath.join(LIB_DIR, 'Parts', safeName(client().name));
+      mkdirp(dir);
+      var file = nodePath.join(dir, safeName(baseName(g[0].path)) + ' [' + g.length + ' pieces ' + hashStr(g[0].path + sig) + '].wav');
+      nodeFs.writeFileSync(file, new Uint8Array(encodeWav(chs, sr, peak > 0.999)));
+      return { file: file, len: n / sr };
+    });
+  }
   function captureFromTimeline() {
-    setStatus('Reading the selected clips\u2026');
+    setStatus('Reading the selected clips…');
     hostJson('FrameshiftSK.captureSelected()').then(function (list) {
       if (!(list instanceof Array)) list = [list];
-      // Every selected clip becomes its own part (joining clips that continue the same song made
-      // two selected clips come back as one part, which looked like only the first was saved).
-      var parts = list, saved = [], dups = [];
-      parts.forEach(function (c) {
-        var dupC = duplicateOf('part', c.path, c.inS, c.outS);
-        if (dupC) { dups.push(dupC); return; }
-        var tag = guessTag(c);
-        var a = newAsset('part', c.path, {
-          name: baseName(c.path) + ' ' + fmtClock(c.inS) + '\u2013' + fmtClock(c.outS),
-          in: c.inS, out: c.outS, keys: c.keys || [], mode: 'media', db: c.db,
-          track: c.track >= 0 ? c.track : 3, tag: tag, color: tagOf(tag).color
+      var groups = groupCaptured(list), saved = [], dups = [], joined = 0;
+      var jobs = groups.map(function (g) {
+        var first = g[0], last = g[g.length - 1], tag = guessTag({ seqEnd: first.seqEnd, start: first.start, inS: 0, outS: last.end - first.start });
+        var name = baseName(first.path) + ' ' + g.map(function (x) { return fmtClock(x.inS) + '–' + fmtClock(x.outS); }).join(' + ');
+        var common = { name: name, mode: 'media', track: first.track >= 0 ? first.track : 3, tag: tag, color: tagOf(tag).color };
+        if (g.length === 1) {
+          var dup1 = duplicateOf('part', first.path, first.inS, first.outS);
+          if (dup1) { dups.push(dup1); return Promise.resolve(); }
+          saved.push(newAsset('part', first.path, Object.assign(common, { in: first.inS, out: first.outS, keys: cleanKeys((first.keys || []).slice()), db: first.db })));
+          return Promise.resolve();
+        }
+        joined++;
+        var keys = groupKeys(g);
+        return renderGroup(g).then(function (r) {
+          var dupG = duplicateOf('part', r.file, 0, r.len);
+          if (dupG) { dups.push(dupG); return; }
+          saved.push(newAsset('part', r.file, Object.assign(common, { in: 0, out: r.len, keys: keys, db: keys.length ? keys[0][1] : first.db, source: first.path })));
         });
-        client().assets.push(a); saved.push(a);
       });
-      if (!saved.length) { setStatus(dups.length ? dupMessage(dups[0]) : 'Nothing to save.', 'err'); return; }
-      save();
-      editing = null; view = 'sounds'; lib.activeKind = 'part';
-      renderAll(); saved.forEach(function (a) { flash(a.id); ensureAnalysis(a).then(function () { afterAssetChange(a); }); });
-      var joinedNote = '';
-      setStatus(saved.length === 1
-        ? 'Saved ' + fmtSec(saved[0].out - saved[0].in) + ' to ' + tagOf(saved[0].tag).name + (saved[0].keys.length ? ' with ' + saved[0].keys.length + ' keyframes' : '') + joinedNote + '. Press \u270E any time to change it.'
-        : 'Saved ' + saved.length + ' BGM parts from ' + list.length + ' selected clips' + joinedNote + (dups.length ? '; ' + dups.length + ' already saved, skipped' : '') + '.', 'ok');
+      return Promise.all(jobs).then(function () {
+        if (!saved.length) { setStatus(dups.length ? dupMessage(dups[0]) : 'Nothing to save.', 'err'); return; }
+        saved.forEach(function (a) { client().assets.push(a); });
+        save();
+        editing = null; view = 'sounds'; lib.activeKind = 'part';
+        renderAll(); saved.forEach(function (a) { flash(a.id); ensureAnalysis(a).then(function () { afterAssetChange(a); }); });
+        var joinedNote = joined ? ' (pieces of one song next to each other were saved as one part)' : '';
+        setStatus(saved.length === 1
+          ? 'Saved ' + fmtSec(saved[0].out - saved[0].in) + ' to ' + tagOf(saved[0].tag).name + (saved[0].keys.length ? ' with ' + saved[0].keys.length + ' keyframes' : '') + joinedNote + '. Press ✎ any time to change it.'
+          : 'Saved ' + saved.length + ' BGM parts from ' + list.length + ' selected clips' + joinedNote + (dups.length ? '; ' + dups.length + ' already saved, skipped' : '') + '.', 'ok');
+      });
     }).catch(function (e) { setStatus(e.message, 'err'); });
   }
 
@@ -2357,7 +2426,7 @@
     });
   });
 
-  window.__cskTest = { joinCaptured: joinCaptured, bgmFadeKeys: bgmFadeKeys, duplicateOf: duplicateOf, encodeWav: encodeWav, renderRange: renderRange, decode: decode, dragSpec: dragSpec, prepareDrag: prepareDrag,
+  window.__cskTest = { joinCaptured: joinCaptured, groupCaptured: groupCaptured, groupKeys: groupKeys, cleanKeys: cleanKeys, bgmFadeKeys: bgmFadeKeys, duplicateOf: duplicateOf, encodeWav: encodeWav, renderRange: renderRange, decode: decode, dragSpec: dragSpec, prepareDrag: prepareDrag,
     bandProfile: bandProfile, measure: measure, importFromDir: importFromDir, runSyncAll: runSyncAll,
     lib: function () { return lib; }, check: function () { return check; }, bgmSel: function () { return bgmSel; } };
 
