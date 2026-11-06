@@ -3,7 +3,7 @@
  * ES3 only: no built-in JSON, no let/const, no arrow functions.
  * Public functions return "OK|..." or "ERR|message".
  */
-var CSK = (function () {
+var FrameshiftSK = (function () { // own global: the old standalone Client Sound Kit panel used "CSK"
     var BIN_ROOT = "Client Sound Kit";
     var EPS = 0.0005;
     var TICKS = 254016000000;
@@ -138,10 +138,23 @@ var CSK = (function () {
         }
         var mode = (!inMedia && inSeq) ? "seq" : "media";
         var base = mode === "seq" ? st : inS;
-        var keys = [];
-        for (i = 0; i < ks.length; i++) {
-            keys.push([r(keySeconds(ks[i]) - base, 3), r(levelToDb(level.getValueAtKey(ks[i])), 2)]);
+        var all = [];
+        for (i = 0; i < ks.length; i++) all.push([keySeconds(ks[i]) - base, levelToDb(level.getValueAtKey(ks[i]))]);
+        all.sort(function (a, b) { return a[0] - b[0]; });
+        // Premiere keeps keyframes that sit outside a trimmed clip. Keep only the ones inside it,
+        // with the exact level at the clip's start and end where keyframes ran past them.
+        var len = mode === "seq" ? en - st : outS - inS, keys = [];
+        function valAt(x) {
+            if (x <= all[0][0]) return all[0][1];
+            for (var q = 1; q < all.length; q++) {
+                if (x <= all[q][0]) { var sp = all[q][0] - all[q - 1][0] || 1; return all[q - 1][1] + (all[q][1] - all[q - 1][1]) * ((x - all[q - 1][0]) / sp); }
+            }
+            return all[all.length - 1][1];
         }
+        if (all.length && all[0][0] < -0.0005) keys.push([0, r(valAt(0), 2)]);
+        for (i = 0; i < all.length; i++) if (all[i][0] >= -0.0005 && all[i][0] <= len + 0.0005) keys.push([r(Math.max(0, Math.min(len, all[i][0])), 3), r(all[i][1], 2)]);
+        if (all.length && all[all.length - 1][0] > len + 0.0005) keys.push([r(len, 3), r(valAt(len), 2)]);
+        if (!keys.length && all.length) keys.push([0, r(valAt(0), 2)]);
         return { db: keys.length ? keys[0][1] : r(levelToDb(level.getValue()), 2), keys: keys, mode: mode };
     }
 
@@ -285,34 +298,64 @@ var CSK = (function () {
         },
 
         // Reads the selected audio clip on the timeline (to save it as a BGM part).
+        // Reads every selected audio clip on the timeline (to save as BGM parts), in timeline order.
         captureSelected: function () {
             try {
                 var seq = app.project.activeSequence;
                 if (!seq) return "ERR|Open a sequence first.";
-                var sel = seq.getSelection(), clip = null, i, j;
-                if (!sel || !sel.length) return "ERR|Select a BGM clip on the timeline first.";
-                for (i = 0; i < sel.length && !clip; i++) {
-                    if (sel[i].mediaType === "Audio") clip = sel[i];
-                }
-                if (!clip) return "ERR|The selection has no audio clip. Select the BGM clip itself.";
-                var ti = -1;
-                for (i = 0; i < seq.audioTracks.numTracks && ti < 0; i++) {
-                    var tr = seq.audioTracks[i];
-                    for (j = 0; j < tr.clips.numItems; j++) {
-                        if (tr.clips[j].nodeId === clip.nodeId) { ti = i; break; }
-                    }
-                }
-                var path = clip.projectItem ? clip.projectItem.getMediaPath() : "";
-                if (!path) return "ERR|Couldn't find the media file for this clip.";
-                var v = readVolume(clip);
+                var sel = seq.getSelection(), i, j, out = [];
+                if (!sel || !sel.length) return "ERR|Select the BGM clips on the timeline first.";
                 var seqEnd = 0;
                 try { seqEnd = Number(seq.end) / TICKS; } catch (e5) {}
-                return "OK|" + J({
-                    name: clip.name, path: path, track: ti,
-                    start: r(clip.start.seconds, 3), seqEnd: r(seqEnd, 3),
-                    inS: r(clip.inPoint.seconds, 3), outS: r(clip.outPoint.seconds, 3),
-                    db: v.db, keys: v.keys, mode: v.mode
-                });
+                var ats = seq.audioTracks, na = ats.numTracks;
+                for (i = 0; i < sel.length; i++) {
+                    var clip = sel[i];
+                    if (clip.mediaType !== "Audio") continue;
+                    var ti = -1;
+                    for (var t = 0; t < na && ti < 0; t++) {
+                        var cl = ats[t].clips, nc = cl.numItems;
+                        for (j = 0; j < nc; j++) if (cl[j].nodeId === clip.nodeId) { ti = t; break; }
+                    }
+                    var path = "";
+                    try { path = clip.projectItem ? clip.projectItem.getMediaPath() : ""; } catch (e6) {}
+                    if (!path) continue;
+                    var v = readVolume(clip);
+                    out.push({ name: clip.name, path: path, track: ti,
+                        start: r(clip.start.seconds, 3), end: r(clip.end.seconds, 3), seqEnd: r(seqEnd, 3),
+                        inS: r(clip.inPoint.seconds, 3), outS: r(clip.outPoint.seconds, 3),
+                        db: v.db, keys: v.keys, mode: v.mode });
+                }
+                if (!out.length) return "ERR|The selection has no audio clips. Select the BGM clips themselves.";
+                out.sort(function (a, b) { return a.start - b.start; });
+                return "OK|" + J(out);
+            } catch (e) { return "ERR|" + e.message; }
+        },
+
+        // Media files of what's selected in Premiere: audio clips on the timeline, and items in the
+        // Project panel. Used when clips are dragged from Premiere into the panel, and by "Add selected".
+        selectedMedia: function () {
+            try {
+                var paths = [], seen = {}, i;
+                function add(item) {
+                    try {
+                        if (!item || (item.isSequence && item.isSequence())) return;
+                        var p = String(item.getMediaPath() || "");
+                        if (p && !seen[p]) { seen[p] = 1; paths.push(p); }
+                    } catch (e) {}
+                }
+                var seq = app.project.activeSequence;
+                if (seq) {
+                    var sel = seq.getSelection() || [];
+                    for (i = 0; i < sel.length; i++) if (sel[i].mediaType === "Audio") add(sel[i].projectItem);
+                }
+                try {
+                    var view = app.getCurrentProjectViewIDs ? app.getCurrentProjectViewIDs() : [];
+                    for (var v = 0; v < view.length; v++) {
+                        var items = app.getProjectViewSelection(view[v]) || [];
+                        for (i = 0; i < items.length; i++) add(items[i]);
+                    }
+                } catch (e2) {}
+                return "OK|" + J(paths);
             } catch (e) { return "ERR|" + e.message; }
         },
 

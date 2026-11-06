@@ -19,7 +19,8 @@
   <main id="settings" class="list hidden"></main>
 
   <div id="dropzone" class="dropzone">
-    <button id="captureBtn" class="capture hidden">Save selected timeline clip</button>
+    <button id="captureBtn" class="capture hidden">Save selected timeline clips</button>
+    <button id="addSelected" class="capture">Add what&rsquo;s selected in Premiere</button>
     <button id="addSounds" class="primary wide">+ Add sounds</button>
     <div class="hint" id="dropHint">or drag audio files here</div>
   </div>

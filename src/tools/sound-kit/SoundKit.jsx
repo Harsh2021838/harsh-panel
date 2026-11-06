@@ -91,7 +91,7 @@ const ASK_CSS = ".csk-body { position: relative; }" +
 
 function loadHostScript() {
   const p = extensionPath() + "/jsx/client-sound-kit.jsx";
-  return evalRaw("$.evalFile(" + JSON.stringify(p) + "); typeof CSK").then((r) => {
+  return evalRaw("$.evalFile(" + JSON.stringify(p) + "); typeof FrameshiftSK").then((r) => {
     if (r !== "object") throw new Error("Couldn't load Sound Kit into " + hostName + ". Restart " + hostName + " and try again.");
   });
 }

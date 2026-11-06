@@ -326,6 +326,7 @@
     $('#settings').classList.toggle('hidden', !inSettings);
     $('#dropzone').classList.toggle('hidden', inSettings || isCheck);
     $('#captureBtn').classList.toggle('hidden', lib.activeKind !== 'part');
+    $('#addSelected').classList.toggle('hidden', lib.activeKind === 'part');
     $('#dropHint').textContent = lib.activeKind === 'part'
       ? 'Select a keyframed BGM clip on the timeline, then press Save selected timeline clip'
       : 'or drag audio files here';
@@ -647,20 +648,20 @@
     var script, what = a.name, range = a.kind === 'bgm' ? bgmSel[a.id] : null;
     if (a.kind === 'part') {
       var keys = a.keys.map(function (k) { return Number(k[0]) + ':' + Number(k[1]); }).join(';');
-      script = 'CSK.placePart(' + q(a.path) + ',' + q(client().name) + ',' + Number(a.track) + ',' +
+      script = 'FrameshiftSK.placePart(' + q(a.path) + ',' + q(client().name) + ',' + Number(a.track) + ',' +
         Number(a.in) + ',' + Number(a.out) + ',' + q(keys) + ',' + q(a.mode || 'media') + ',' + clipDb(a) + ',' + Number(a.color) + ')';
     } else if (range) {
       what = a.name + ' (' + fmtClock(range.a) + '–' + fmtClock(range.b) + ')';
-      script = 'CSK.placePart(' + q(a.path) + ',' + q(client().name) + ',' + Number(a.track) + ',' +
+      script = 'FrameshiftSK.placePart(' + q(a.path) + ',' + q(client().name) + ',' + Number(a.track) + ',' +
         range.a + ',' + range.b + ',' + q(bgmFadeKeys(a, range.b - range.a)) + ',"media",' + clipDb(a) + ',' + Number(a.color) + ')';
     } else if (a.kind === 'bgm' && a.wave && a.wave.fileDur && bgmFadeKeys(a, a.wave.fileDur)) {
-      script = 'CSK.placePart(' + q(a.path) + ',' + q(client().name) + ',' + Number(a.track) + ',0,0,' +
+      script = 'FrameshiftSK.placePart(' + q(a.path) + ',' + q(client().name) + ',' + Number(a.track) + ',0,0,' +
         q(bgmFadeKeys(a, a.wave.fileDur)) + ',"media",' + clipDb(a) + ',' + Number(a.color) + ')';
     } else {
       var out = a.kind === 'sfx' ? outForBeats(a, beats) : 0;
       var total = a.wave && a.wave.onsets ? a.wave.onsets.length : 0;
       if (a.kind === 'sfx' && out) what = a.name + ' (' + beats + ' of ' + total + ' beats)';
-      script = 'CSK.place(' + q(a.path) + ',' + q(client().name) + ',' + clipDb(a) + ',' +
+      script = 'FrameshiftSK.place(' + q(a.path) + ',' + q(client().name) + ',' + clipDb(a) + ',' +
         Number(a.track) + ',' + out + ',' + Number(a.color) + ')';
     }
     placing = true; if (btn) btn.disabled = true;
@@ -790,7 +791,7 @@
         ['wav', 'mp3', 'aif', 'aiff', 'm4a', 'aac', 'flac', 'ogg']);
       return Promise.resolve(r && r.err === 0 ? (r.data || []) : []);
     }
-    return host('CSK.pickFiles()').then(function (r) {
+    return host('FrameshiftSK.pickFiles()').then(function (r) {
       return r.indexOf('OK|') === 0 ? r.slice(3).split('\n').filter(Boolean) : [];
     });
   }
@@ -838,24 +839,59 @@
     return 'intro';
   }
 
+  // Frameshift: every selected clip is saved. Clips of one song that follow each other on the
+  // timeline and in the song (a song cut in two) become one part; other clips become their own parts.
+  function joinCaptured(clips) {
+    var out = [];
+    clips.forEach(function (c) {
+      var prev = out[out.length - 1];
+      if (prev && prev.path === c.path && Math.abs(c.start - prev.end) < 0.05 && Math.abs(c.inS - prev.outS) < 0.05) {
+        // keys are relative to each clip's start; the second clip starts this far into the joined part
+        var offset = c.inS - prev.inS;
+        prev.keys = prev.keys.concat((c.keys || []).map(function (k) { return [Math.round((k[0] + offset) * 1000) / 1000, k[1]]; }))
+          .filter(function (k, i, arr) { return !i || Math.abs(k[0] - arr[i - 1][0]) > 0.0005; });
+        prev.outS = c.outS; prev.end = c.end; prev.joined = (prev.joined || 1) + 1;
+      } else out.push(JSON.parse(JSON.stringify(c)));
+    });
+    return out;
+  }
   function captureFromTimeline() {
-    setStatus('Reading the selected clip…');
-    hostJson('CSK.captureSelected()').then(function (c) {
-      var dupC = duplicateOf('part', c.path, c.inS, c.outS);
-      if (dupC) { setStatus(dupMessage(dupC), 'err'); return; }
-      var tag = guessTag(c);
-      var a = newAsset('part', c.path, {
-        name: baseName(c.path) + ' ' + fmtClock(c.inS) + '–' + fmtClock(c.outS),
-        in: c.inS, out: c.outS, keys: c.keys || [], mode: c.mode || 'media', db: c.db,
-        track: c.track >= 0 ? c.track : 3, tag: tag, color: tagOf(tag).color
+    setStatus('Reading the selected clips\u2026');
+    hostJson('FrameshiftSK.captureSelected()').then(function (list) {
+      if (!(list instanceof Array)) list = [list];
+      var parts = joinCaptured(list), saved = [], dups = [];
+      parts.forEach(function (c) {
+        var dupC = duplicateOf('part', c.path, c.inS, c.outS);
+        if (dupC) { dups.push(dupC); return; }
+        var tag = guessTag(c);
+        var a = newAsset('part', c.path, {
+          name: baseName(c.path) + ' ' + fmtClock(c.inS) + '\u2013' + fmtClock(c.outS),
+          in: c.inS, out: c.outS, keys: c.keys || [], mode: 'media', db: c.db,
+          track: c.track >= 0 ? c.track : 3, tag: tag, color: tagOf(tag).color
+        });
+        client().assets.push(a); saved.push(a);
       });
-      client().assets.push(a); save();
+      if (!saved.length) { setStatus(dups.length ? dupMessage(dups[0]) : 'Nothing to save.', 'err'); return; }
+      save();
       editing = null; view = 'sounds'; lib.activeKind = 'part';
-      renderAll(); flash(a.id);
-      ensureAnalysis(a).then(function () { afterAssetChange(a); });
-      setStatus('Saved ' + fmtSec(c.outS - c.inS) + ' to ' + tagOf(tag).name +
-        (a.keys.length ? ' with ' + a.keys.length + ' keyframes' : '') + '. Press ✎ any time to change it.', 'ok');
+      renderAll(); saved.forEach(function (a) { flash(a.id); ensureAnalysis(a).then(function () { afterAssetChange(a); }); });
+      var joinedNote = parts.some(function (c) { return c.joined > 1; }) ? ' (clips that continue the same song were joined)' : '';
+      setStatus(saved.length === 1
+        ? 'Saved ' + fmtSec(saved[0].out - saved[0].in) + ' to ' + tagOf(saved[0].tag).name + (saved[0].keys.length ? ' with ' + saved[0].keys.length + ' keyframes' : '') + joinedNote + '. Press \u270E any time to change it.'
+        : 'Saved ' + saved.length + ' BGM parts from ' + list.length + ' selected clips' + joinedNote + (dups.length ? '; ' + dups.length + ' already saved, skipped' : '') + '.', 'ok');
     }).catch(function (e) { setStatus(e.message, 'err'); });
+  }
+
+  // Frameshift: sounds dragged in from Premiere (timeline or Project panel) carry no files, but
+  // they are selected in Premiere at that moment: add those. Also behind "Add selected from Premiere".
+  function addFromPremiereSelection(quietIfNone) {
+    if (lib.activeKind === 'part') return captureFromTimeline();
+    return hostJson('FrameshiftSK.selectedMedia()').then(function (paths) {
+      paths = (paths || []).filter(function (p) { return AUDIO_EXT.test(p); });
+      if (paths.length) addFiles(paths);
+      else if (!quietIfNone) setStatus('Select audio clips on the timeline or in the Project panel first.', 'err');
+      return paths.length;
+    }).catch(function (e) { setStatus(e.message, 'err'); return 0; });
   }
 
   // ---------- Events: cards ----------
@@ -988,7 +1024,7 @@
     var tries = 0;
     (function look() {
       tries++;
-      host('CSK.afterDrop(' + q(d.file) + ',' + Number(d.a.color) + ',' + q(keys) + ',' + q(d.a.mode || 'media') + ')').then(function (r) {
+      host('FrameshiftSK.afterDrop(' + q(d.file) + ',' + Number(d.a.color) + ',' + q(keys) + ',' + q(d.a.mode || 'media') + ')').then(function (r) {
         if (r.indexOf('OK|') === 0 && Number(r.split('|')[1]) > 0) {
           setStatus('Dropped ' + d.a.name + (d.label ? ' (' + d.label + ')' : '') + ', coloured ' + LABELS[d.a.color].name +
             (keys ? ', with its ' + keys.split(';').length + ' volume keyframes' : ' at ' + volLabel(d.a)) + colourNote(r) + '.', 'ok');
@@ -1686,7 +1722,7 @@
     if (!s.sfx.length && !s.bgm.length && !s.others) { setStatus('Pick at least one track to check.', 'err'); return; }
     check.running = true; check.result = null; renderCheck();
     setStatus('Reading clips between In and Out…');
-    hostJson('CSK.scan(' + q(s.sfx.join(',')) + ',' + q(s.bgm.join(',')) + ',' + (s.others ? 'true' : 'false') + ')').then(function (meta) {
+    hostJson('FrameshiftSK.scan(' + q(s.sfx.join(',')) + ',' + q(s.bgm.join(',')) + ',' + (s.others ? 'true' : 'false') + ')').then(function (meta) {
       seqTracks = Math.max(1, meta.tracks || seqTracks);
       var items = meta.clips.map(function (c) { c.key = ignoreKey(meta, c); return c; });
       var paths = []; items.forEach(function (c) { if (paths.indexOf(c.path) < 0) paths.push(c.path); });
@@ -1731,7 +1767,7 @@
     if (cv && check.result) {
       var rect = cv.getBoundingClientRect(), meta = check.result.meta;
       var t = meta.inS + clamp((e.clientX - rect.left) / rect.width, 0, 1) * (meta.outS - meta.inS);
-      host('CSK.gotoTime(' + t + ')').then(function () { setStatus('Playhead at ' + timecode(t, meta.fps) + '.', 'ok'); });
+      host('FrameshiftSK.gotoTime(' + t + ')').then(function () { setStatus('Playhead at ' + timecode(t, meta.fps) + '.', 'ok'); });
       return;
     }
     var btn = e.target.closest('button, input[data-act]'); if (!btn) return;
@@ -1750,16 +1786,16 @@
     var fps = check.result.meta.fps, clip = x.isMix ? x.clip : x, t = x.isMix ? x.t : x.start;
     var tc = timecode(t, fps);
     if (act === 'goto') {
-      var go = clip ? host('CSK.gotoClip(' + clip.track + ',' + clip.start + ')') : Promise.resolve('OK|0');
+      var go = clip ? host('FrameshiftSK.gotoClip(' + clip.track + ',' + clip.start + ')') : Promise.resolve('OK|0');
       go.then(function (r1) {
-        return (x.isMix ? host('CSK.gotoTime(' + t + ')') : Promise.resolve(r1)).then(function (r2b) {
+        return (x.isMix ? host('FrameshiftSK.gotoTime(' + t + ')') : Promise.resolve(r1)).then(function (r2b) {
           if (r2b.indexOf('OK|') !== 0) { setStatus(r2b.split('|').slice(1).join('|'), 'err'); return; }
           setStatus('Playhead at ' + tc + (clip && r1 === 'OK|1' ? ', ' + clip.name + ' selected on A' + (clip.track + 1) + '.' : '.'), 'ok');
         });
       });
     } else if (act === 'lower' && clip) {
       btn.disabled = true;
-      hostJson('CSK.adjustClip(' + clip.track + ',' + clip.start + ',-3)').then(function (v) {
+      hostJson('FrameshiftSK.adjustClip(' + clip.track + ',' + clip.start + ',-3)').then(function (v) {
         clip.db = v.db; clip.keys = v.keys;
         var m = measure(clip, clip.prof); clip.peak = m.peak; clip.loud = m.loud; clip.band = m.band;
         evaluate(); renderCheck();
@@ -2189,7 +2225,7 @@
       editing = null; stopPreview(); lib.activeKind = t.dataset.kind; view = 'sounds'; save();
       renderAll();
       if (lib.activeKind === 'check' && inCEP) {
-        host('CSK.sequenceInfo()').then(function (r) {
+        host('FrameshiftSK.sequenceInfo()').then(function (r) {
           var n = Number(r.split('|')[1]);
           if (n > 0 && n !== seqTracks) { seqTracks = n; renderCheck(); }
         });
@@ -2202,6 +2238,7 @@
   // ---------- Add sounds / capture ----------
   $('#addSounds').addEventListener('click', function () { pickFiles(lib.activeKind !== 'part').then(addFiles); });
   $('#captureBtn').addEventListener('click', captureFromTimeline);
+  $('#addSelected').addEventListener('click', function () { addFromPremiereSelection(false); });
 
   // Files dragged in from Explorer/Finder. Drags that start in this panel are ignored here.
   function acceptsDrop() { return view === 'sounds' && lib.activeKind !== 'check' && !internalDrag; }
@@ -2230,6 +2267,7 @@
     if (paths.length) { addFiles(paths); return; }
     // Frameshift: Premiere's panel browser gave no file locations, but it does give the files'
     // contents. Save a copy in the library (Sound Kit/Dropped/<client>) and add that.
+    if (!(e.dataTransfer.files || []).length) { setStatus('Reading what you dragged from Premiere\u2026'); addFromPremiereSelection(false); return; }
     var files = [].slice.call(e.dataTransfer.files || []).filter(function (f) { return AUDIO_EXT.test(f.name); });
     if (!files.length) { setStatus('No audio files in that drop. Supported: wav, mp3, aif, m4a, aac, flac, ogg.', 'err'); return; }
     setStatus('Copying ' + files.length + ' dropped file' + (files.length > 1 ? 's' : '') + ' into the library\u2026');
@@ -2257,18 +2295,18 @@
     });
   });
 
-  window.__cskTest = { bgmFadeKeys: bgmFadeKeys, duplicateOf: duplicateOf, encodeWav: encodeWav, renderRange: renderRange, decode: decode, dragSpec: dragSpec, prepareDrag: prepareDrag,
+  window.__cskTest = { joinCaptured: joinCaptured, bgmFadeKeys: bgmFadeKeys, duplicateOf: duplicateOf, encodeWav: encodeWav, renderRange: renderRange, decode: decode, dragSpec: dragSpec, prepareDrag: prepareDrag,
     bandProfile: bandProfile, measure: measure, importFromDir: importFromDir, runSyncAll: runSyncAll,
     lib: function () { return lib; }, check: function () { return check; }, bgmSel: function () { return bgmSel; } };
 
   // ---------- Boot ----------
   renderAll();
   if (inCEP) {
-    host('CSK.ping()').then(function (r) {
+    host('FrameshiftSK.ping()').then(function (r) {
       if (r.indexOf('OK|') === 0) setStatus('Ready. Move the playhead, then click a sound or drag it to the timeline.');
       else setStatus('Couldn’t talk to Premiere: ' + r, 'err');
     });
-    host('CSK.sequenceInfo()').then(function (r) { var n = Number(r.split('|')[1]); if (n > 0) seqTracks = n; });
+    host('FrameshiftSK.sequenceInfo()').then(function (r) { var n = Number(r.split('|')[1]); if (n > 0) seqTracks = n; });
   } else {
     setStatus('Preview mode: open inside Premiere Pro to place sounds.');
   }
