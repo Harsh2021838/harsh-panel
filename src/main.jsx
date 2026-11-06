@@ -11,10 +11,11 @@ import { listClients } from "./library.js";
 import TextQC from "./tools/text-qc/TextQC.jsx";
 import SoundKit from "./tools/sound-kit/SoundKit.jsx";
 import GapQC from "./tools/gap-qc/GapQC.jsx";
+import AudioQC from "./tools/audio-qc/AudioQC.jsx";
 import CompVault from "./tools/comp-vault/CompVault.jsx";
 import "./styles.css";
 
-const VERSION = "2.15.7";
+const VERSION = "2.16.0";
 
 // The four sections. Add a tool by putting it in a section's `tools` list
 // (or drop a plugin file into /plugins, see plugins/README.md).
@@ -29,6 +30,7 @@ const SECTIONS = [
     id: "qc", name: "QC", icon: Check, empty: "Checks you run before export.", tools: [
       { id: "text-qc", name: "Text QC", description: "Spelling, grammar and spacing in every piece of on-screen text", icon: Proof, hosts: ["AEFT", "PPRO"], Component: TextQC },
       { id: "gap-qc", name: "Gap QC", description: "Gaps, flash frames, cuts that don\u2019t line up, audio sync, black, offline and frame-rate problems", icon: GapIcon, hosts: ["AEFT", "PPRO"], Component: GapQC },
+      { id: "audio-qc", name: "Audio QC", description: "Distortion, music or SFX covering the voice, uneven SFX levels and clicks at cuts", icon: () => <Wave size={18} />, hosts: ["PPRO"], Component: AudioQC },
     ],
   },
 ];

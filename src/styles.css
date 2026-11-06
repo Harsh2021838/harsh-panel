@@ -570,3 +570,14 @@ input[type="checkbox"] { accent-color: var(--mark); margin: 0; width: 13px; heig
 .gap-keys > span { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
 .gap-keys svg { margin-left: 0; }
 .show-more { width: 100%; margin-top: 8px; }
+
+/* Audio QC */
+.aq-kind { flex: none; width: 26px; height: 26px; border-radius: 7px; display: inline-flex; align-items: center; justify-content: center;
+  font-size: 14px; font-weight: 700; color: #fff; background: rgba(150, 150, 150, 0.42); }
+.aq-kind.clip, .aq-kind.mix { background: var(--bad); }
+.aq-kind.music, .aq-kind.cover { background: #8a63d2; }
+.aq-kind.sfx { background: #d08a2a; }
+.aq-kind.click { background: #3f84c9; }
+.roles-line { margin-top: 2px; }
+.track-roles { display: flex; flex-direction: column; gap: 8px; padding: 8px 0; }
+.track-roles .track-name { min-width: 64px; font-weight: 600; color: var(--ink); }

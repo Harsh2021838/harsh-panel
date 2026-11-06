@@ -10,7 +10,6 @@
       <button class="tab active" data-kind="sfx" role="tab">SFX</button>
       <button class="tab" data-kind="part" role="tab">BGM parts</button>
       <button class="tab" data-kind="bgm" role="tab">Full BGM</button>
-      <button class="tab check-tab" data-kind="check" role="tab">Check</button>
     </div>
   </header>
 

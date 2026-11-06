@@ -71,6 +71,7 @@
   }
 
   function migrate(l) {
+    if (l.activeKind === 'check') l.activeKind = 'sfx'; // Frameshift: the audio check is now QC > Audio QC
     l.clients.forEach(function (c) {
       c.assets.forEach(function (a, i) {
         delete a.count; delete a.gap;
