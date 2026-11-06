@@ -170,9 +170,9 @@ export default function GapQC({ report = () => {} }) {
   const [err, setErr] = useState("");
   const [note, setNote] = useState("");
   const [showIgnored, setShowIgnored] = useState(false);
-  const [checks, setChecks] = useState(() => ({ gaps: true, cuts: true, sync: true, black: true, rate: true, dups: false, ...lsGet("checks", {}) }));
+  const [checks, setChecks] = useState(() => ({ gaps: true, cuts: true, sync: true, black: true, rate: true, dups: false, ...lsGet("checks2", {}) }));
   const [autoGo, setAutoGo] = useState(() => lsGet("autoGo", true));
-  useEffect(() => { lsSet("checks", checks); }, [checks]);
+  useEffect(() => { lsSet("checks2", checks); }, [checks]);
   useEffect(() => { lsSet("autoGo", autoGo); }, [autoGo]);
 
   useEffect(() => { lsSet("scope2", scope); }, [scope]);

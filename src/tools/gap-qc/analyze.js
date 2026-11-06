@@ -3,6 +3,8 @@
 const TICKS = 254016000000;
 const ADJUST = /adjustment layer/i;
 const NOT_A_SHOT = /adjustment layer|black video|colou?r matte|transparent video|graphic|title|\.aep|\.mogrt/i;
+// Overlays and design elements are reused on purpose (film burns, light leaks, grain, logos...).
+const OVERLAY = /burn|leak|light ?pack|flare|grain|dust|scratch|texture|overlay|transition|glitch|bokeh|smoke|particle|frame|border|logo|subscribe|lower ?third|arrow|emoji|sticker|sfx|whoosh/i;
 
 function clipsOf(rows) {
   return rows.map((r) => ({
@@ -29,6 +31,7 @@ function covered(tracks, from, to) {
 
 export function analyze(dump, opts) {
   const out = [];
+  const keys = new Map(); // every row needs its own key, or the list can't tell rows apart
   const checks = opts.checks;
   for (const seq of dump.seqs) {
     const frame = Number(seq.timebase);
@@ -46,8 +49,13 @@ export function analyze(dump, opts) {
         app: "PPRO", container: seq.name, containerId: seq.id, fps, trackKind, track, trackName,
         kind, frames: Math.round(Math.abs(to - from) / frame), time: from / TICKS, startTicks: String(from), endTicks: String(to),
         prev: prev ? prev.name : "", prevIndex: prev ? prev.i : -1, next: next ? next.name : "", nextIndex: next ? next.i : -1, black: false,
-        key: seq.id + ":" + kind + ":" + trackName + ":" + from, ...extra,
+        ...extra,
       });
+      const g = out[out.length - 1];
+      const base = seq.id + ":" + kind + ":" + trackName + ":" + from + ":" + (prev ? prev.i : "") + ":" + (next ? next.i : "");
+      const n = keys.get(base) || 0;
+      keys.set(base, n + 1);
+      g.key = n ? base + "#" + n : base;
     };
 
     // ---- gaps
@@ -168,12 +176,13 @@ export function analyze(dump, opts) {
       const uses = new Map();
       V.forEach((list, t) => list.forEach((c) => {
         const it = item(c);
-        if (c.off || !it || it.seq || NOT_A_SHOT.test(it.name) || c.inPt === null || c.outPt === null) return;
+        if (c.off || !it || it.seq || NOT_A_SHOT.test(it.name) || OVERLAY.test(it.name) || OVERLAY.test(c.name) || c.inPt === null || c.outPt === null) return;
         if (!uses.has(c.node)) uses.set(c.node, []);
         uses.get(c.node).push({ c, t });
       }));
       for (const list of uses.values()) {
-        if (list.length < 2) continue;
+        // Two uses can be a mistake; a clip used three or more times is a repeating element.
+        if (list.length !== 2) continue;
         // sweep by source in point so only overlapping neighbours are compared
         list.sort((x, y) => x.c.inPt - y.c.inPt);
         let found = 0;
