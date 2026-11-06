@@ -1059,7 +1059,10 @@
   // whichever comes first starts the action and the other is ignored. Moves and the release are
   // followed on the whole window, so leaving the waveform mid-drag doesn't lose them.
   var pressAt = 0, faderMove = null;
-  function capture(el, e) { try { if (e.pointerId != null) el.setPointerCapture(e.pointerId); } catch (err) {} }
+  // No pointer capture: in Premiere the release can go missing, and a captured pointer then sends
+  // every later click to the waveform (the tabs and buttons stopped responding). Moves and the
+  // release are followed on the whole window instead.
+  function capture() {}
   function onPress(e) {
     if ((e.button || 0) !== 0) return;
     if (Date.now() - pressAt < 400) return; // the same press, seen as both pointerdown and mousedown
