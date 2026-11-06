@@ -96,7 +96,58 @@ function loadHostScript() {
   });
 }
 
-function run(shadow, root, dir) {
+// Premiere's label names and colours (Preferences > Labels can rename and recolour all 16).
+// Read through Premiere first; if that gives nothing, from its preferences file.
+function labelColour(v) {
+  v = String(v == null ? "" : v).trim();
+  if (/^#?[0-9a-f]{6}$/i.test(v)) return "#" + v.replace("#", "").toLowerCase();
+  const n = Number(v);
+  if (!isFinite(n) || v === "") return "";
+  // Stored as a number with red in the low byte (0xBBGGRR).
+  const x = n >>> 0, r = x & 255, g = (x >> 8) & 255, b = (x >> 16) & 255;
+  return "#" + [r, g, b].map((c) => c.toString(16).padStart(2, "0")).join("");
+}
+function labelsFromPrefsFile() {
+  if (!fs) return [];
+  try {
+    const base = path.join(nodeRequire("os").homedir(), "Documents", "Adobe", "Premiere Pro");
+    const files = [];
+    for (const ver of fs.readdirSync(base)) {
+      const vdir = path.join(base, ver);
+      let subs = [];
+      try { subs = fs.readdirSync(vdir); } catch (e) { continue; }
+      for (const prof of subs) {
+        if (!/^Profile/i.test(prof)) continue;
+        const f = path.join(vdir, prof, "Adobe Premiere Pro Prefs");
+        try { files.push({ f, t: fs.statSync(f).mtimeMs }); } catch (e) {}
+      }
+    }
+    files.sort((a, b) => b.t - a.t);
+    if (!files.length) return [];
+    const text = fs.readFileSync(files[0].f, "utf8");
+    const out = [];
+    for (let i = 0; i < 16; i++) {
+      const n = text.match(new RegExp("LabelNames\\." + i + "\\b[^>]*>([^<]*)<"));
+      const c = text.match(new RegExp("LabelColors\\." + i + "\\b[^>]*>([^<]*)<"));
+      out.push([n ? n[1] : "", c ? c[1] : ""]);
+    }
+    return out;
+  } catch (e) { return []; }
+}
+async function readLabels() {
+  let raw = [];
+  try {
+    const r = await evalRaw("FrameshiftSK.labels()");
+    if (String(r).indexOf("OK|") === 0) raw = JSON.parse(String(r).slice(3));
+  } catch (e) {}
+  if (!raw.some((l) => l && (l[0] || l[1]))) raw = labelsFromPrefsFile();
+  return raw.map((l) => {
+    const name = l && l[0] && !/^\$\$\$/.test(l[0]) ? String(l[0]).trim() : "";
+    return { name, hex: labelColour(l && l[1]) };
+  });
+}
+
+function run(shadow, root, dir, labels) {
   const doc = {
     getElementById: (id) => shadow.getElementById(id),
     querySelector: (s) => shadow.querySelector(s),
@@ -121,6 +172,7 @@ function run(shadow, root, dir) {
     addEventListener: (...a) => window.addEventListener(...a),
     removeEventListener: (...a) => window.removeEventListener(...a),
     __cskDir: dir,
+    __cskLabels: labels,
   };
   const code = patchSource(source);
   // eslint-disable-next-line no-new-func
@@ -144,7 +196,9 @@ export default function SoundKit() {
         const dir = await toolDir("Sound Kit");
         moveOldLibrary(dir);
         await loadHostScript().catch((e) => setError(e.message));
-        run(shadow, root, dir);
+        const labels = await readLabels();
+        window.__cskLabelsRead = labels;
+        run(shadow, root, dir, labels);
       } catch (e) {
         setError("Sound Kit couldn't start: " + e.message);
       }

@@ -209,7 +209,7 @@ var FrameshiftSK = (function () { // own global: the old standalone Client Sound
         var has = false;
         try { if (clip.setColorLabel) { clip.setColorLabel(colorIndex); has = true; } } catch (e1) {}
         try { if (clip.getColorLabel) return "got:" + clip.getColorLabel(); } catch (e2) {}
-        return has ? "set" : "nolabel";
+        return has ? "set" : "item"; // no clip colour functions: the clip took its project item's colour
     }
 
     // Places [inSec, outSec) of a file at the playhead. outSec <= 0 means to the end.
@@ -406,34 +406,109 @@ var FrameshiftSK = (function () { // own global: the old standalone Client Sound
             } catch (e) { return "ERR|" + e.message; }
         },
 
-        // After a file is dragged from the panel onto the timeline: give it the sound's colour, and
-        // for a BGM part dragged as clean audio, put its volume keyframes on the clip ("t:db;t:db").
-        // Returns "OK|<clips found>"; the panel calls again until the clip has landed.
-        afterDrop: function (path, colorIndex, keysStr, mode) {
+        // The label names and colours set in Premiere's Preferences > Labels: [[name, colour], ...].
+        labels: function () {
+            var out = [], i, n, c;
+            for (i = 0; i < 16; i++) {
+                n = ""; c = "";
+                try { if (app.properties.doesPropertyExist("BE.Prefs.LabelNames." + i)) n = String(app.properties.getProperty("BE.Prefs.LabelNames." + i)); } catch (e1) {}
+                try { if (app.properties.doesPropertyExist("BE.Prefs.LabelColors." + i)) c = String(app.properties.getProperty("BE.Prefs.LabelColors." + i)); } catch (e2) {}
+                out.push([n, c]);
+            }
+            return "OK|" + J(out);
+        },
+
+        // Premiere can't colour a timeline clip from a script, and a dropped file arrives as a new
+        // project item with the default colour. But a clip takes its project item's colour when it is
+        // put on the timeline. So when a drag is about to start, remember which project items already
+        // use the file; after the drop (afterDrop) the new clip is swapped, at the same place, for one
+        // item of that file in the client's bin that carries the sound's colour.
+        beforeDrop: function (path) {
+            try {
+                var target = norm(path), all = [];
+                (function walk(it) {
+                    if (isBin(it)) { for (var k = 0; k < it.children.numItems; k++) walk(it.children[k]); }
+                    else { try { if (norm(it.getMediaPath()) === target) all.push(it.nodeId); } catch (e2) {} }
+                })(app.project.rootItem);
+                $.global.__fsDropBefore = $.global.__fsDropBefore || {};
+                $.global.__fsDropBefore[target] = "|" + all.join("|") + "|";
+                return "OK|" + all.length;
+            } catch (e) { return "ERR|" + e.message; }
+        },
+
+        // After a file is dragged from the panel onto the timeline: swap the dropped clip for the
+        // coloured project item (same track, same place), and for a BGM part dragged as clean audio
+        // put its volume keyframes on it ("t:db;t:db"). Only clips of items imported by this drop are
+        // touched. Returns "OK|<clips found>|<item|nolabel>"; the panel calls again until it landed.
+        afterDrop: function (path, colorIndex, keysStr, mode, clientName) {
             try {
                 var target = norm(path), n = 0, i, j, keys = parseKeys(keysStr || ""), colour = "";
-                var item = findItemByPath(app.project.rootItem, target);
-                if (item && colorIndex >= 0) { try { item.setColorLabel(colorIndex); } catch (e1) {} }
-                var seq = app.project.activeSequence;
+                var before = ($.global.__fsDropBefore || {})[target];
+                var known = function (it) { return before && before.indexOf("|" + it.nodeId + "|") >= 0; };
+                // The coloured item: one of this file in the client's bin from before the drop, or a new import there.
+                var bin = getOrCreateBin(getOrCreateBin(app.project.rootItem, BIN_ROOT), clientName || "Shared");
+                var keep = findItemByPath(bin, target);
+                if (keep && before && !known(keep)) keep = null;
+                if (!keep) {
+                    var f = new File(path);
+                    if (f.exists) {
+                        app.project.importFiles([f.fsName], true, bin, false);
+                        for (i = 0; i < bin.children.numItems; i++) { // the last one is the import just made
+                            var ch = bin.children[i];
+                            try { if (!isBin(ch) && norm(ch.getMediaPath()) === target && !known(ch)) keep = ch; } catch (e0) {}
+                        }
+                    }
+                    if (!keep) keep = getProjectItem(path, clientName);
+                    if (before) { before += keep.nodeId + "|"; $.global.__fsDropBefore[target] = before; }
+                }
+                if (colorIndex >= 0) { try { keep.setColorLabel(colorIndex); } catch (e1) {} }
+                var seq = app.project.activeSequence, spare = [], spareSeen = {};
                 if (seq) {
                     var ats = seq.audioTracks, na = ats.numTracks;
                     for (i = 0; i < na; i++) {
-                        var clips = ats[i].clips, nc = clips.numItems;
-                        for (j = 0; j < nc; j++) {
-                            var c = clips[j];
+                        var tr = ats[i], landed = [];
+                        for (j = 0; j < tr.clips.numItems; j++) {
+                            var c = tr.clips[j], pi = null;
+                            try { pi = c.projectItem; } catch (e2) {}
+                            if (!pi) continue;
+                            var mp = "";
+                            try { mp = norm(pi.getMediaPath()); } catch (e3) {}
+                            if (mp !== target || pi.nodeId === keep.nodeId) continue;
+                            if (before && known(pi)) continue; // an earlier drop: leave it
+                            if (!before) { n++; colour = "nolabel"; continue; } // no beforeDrop: just report it landed
+                            landed.push({ clip: c, item: pi, start: c.start.seconds, end: c.end.seconds });
+                        }
+                        for (j = 0; j < landed.length; j++) {
+                            var L = landed[j], nc = null;
                             try {
-                                if (!c.projectItem || norm(c.projectItem.getMediaPath()) !== target) continue;
-                                n++;
-                                if (colorIndex >= 0) colour = labelClip(c, colorIndex);
-                                if (keys.length) {
-                                    var level = getLevelParam(c), varying = false;
-                                    try { varying = level && level.isTimeVarying(); } catch (e4) {}
-                                    if (level && !varying) applyKeys(c, keys, mode === "seq" ? "seq" : "media");
-                                }
-                            } catch (e2) {}
+                                L.clip.remove(false, false);
+                                try { keep.clearInPoint(); keep.clearOutPoint(); } catch (e4) {}
+                                tr.overwriteClip(keep, L.start);
+                                nc = findClipAt(tr, L.start, keep);
+                                if (nc && nc.end.seconds > L.end + 0.01) { var t = new Time(); t.seconds = L.end; nc.end = t; }
+                                colour = "item";
+                                if (!spareSeen[L.item.nodeId]) { spareSeen[L.item.nodeId] = 1; spare.push(L.item); }
+                            } catch (e5) { nc = findClipAt(tr, L.start, null); colour = colour || "nolabel"; }
+                            n++;
+                            if (nc && keys.length) {
+                                var level = getLevelParam(nc), varying = false;
+                                try { varying = level && level.isTimeVarying(); } catch (e6) {}
+                                if (level && !varying) applyKeys(nc, keys, mode === "seq" ? "seq" : "media");
+                            }
                         }
                     }
                 }
+                // The copies Premiere imported for the drop are no longer used: delete them.
+                if (spare.length) {
+                    try {
+                        var trash = app.project.rootItem.createBin("Frameshift drop copies");
+                        if (trash) {
+                            for (i = 0; i < spare.length; i++) { try { spare[i].moveBin(trash); } catch (e7) {} }
+                            trash.deleteBin();
+                        }
+                    } catch (e8) {}
+                }
+                if (n && before) delete $.global.__fsDropBefore[target];
                 return "OK|" + n + "|" + colour;
             } catch (e) { return "ERR|" + e.message; }
         },

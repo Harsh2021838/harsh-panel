@@ -22,6 +22,20 @@
     { id: 'middle', name: 'Middle', color: 10 },
     { id: 'ending', name: 'Ending', color: 8 }
   ];
+  var BGM_COLOR = 3;
+  // Frameshift: Premiere lets you rename and recolour the 16 labels (Preferences > Labels). Use the
+  // names and colours this Premiere really has, so the colour picked here is the one on the timeline.
+  if (window.__cskLabels && window.__cskLabels.length) {
+    window.__cskLabels.forEach(function (l, i) {
+      if (!LABELS[i] || !l) return;
+      if (l.name) LABELS[i].name = l.name;
+      if (l.hex) LABELS[i].hex = l.hex;
+    });
+    var findLabel = function (re) { for (var i = 0; i < LABELS.length; i++) if (re.test(LABELS[i].name)) return i; return -1; };
+    var sfxL = findLabel(/^\s*sfx\b|sound ?effects?/i), bgmL = findLabel(/^\s*bgm\b|^\s*music\b/i);
+    if (sfxL >= 0) DEFAULT_SFX_COLORS = [sfxL];
+    if (bgmL >= 0) { BGM_COLOR = bgmL; TAGS.forEach(function (t) { t.color = bgmL; }); }
+  }
   var KIND_NAMES = { sfx: 'sound effects', part: 'BGM parts', bgm: 'full BGM tracks' };
 
   // ---------- Host bridge ----------
@@ -60,7 +74,7 @@
     l.clients.forEach(function (c) {
       c.assets.forEach(function (a, i) {
         delete a.count; delete a.gap;
-        if (a.color == null) a.color = a.kind === 'bgm' ? 3 : DEFAULT_SFX_COLORS[i % DEFAULT_SFX_COLORS.length];
+        if (a.color == null) a.color = a.kind === 'bgm' ? BGM_COLOR : DEFAULT_SFX_COLORS[i % DEFAULT_SFX_COLORS.length];
         if (a.track == null) a.track = a.kind === 'sfx' ? 1 : 3;
         if (a.kind === 'part') {
           if (!a.keys) a.keys = [];
@@ -800,7 +814,7 @@
     var existing = client().assets.filter(function (a) { return a.kind === 'sfx'; }).length;
     var a = { id: uid(), name: baseName(path), path: path, kind: kind };
     if (kind === 'sfx') { a.db = -10; a.track = 1; a.color = DEFAULT_SFX_COLORS[existing % DEFAULT_SFX_COLORS.length]; }
-    else if (kind === 'bgm') { a.db = -22; a.track = 3; a.color = 3; }
+    else if (kind === 'bgm') { a.db = -22; a.track = 3; a.color = BGM_COLOR; }
     else { a.db = -18; a.track = 3; a.tag = 'intro'; a.color = tagOf('intro').color; a.in = 0; a.out = 6; a.keys = []; a.mode = 'media'; a.name = baseName(path) + ' part'; }
     if (extra) Object.keys(extra).forEach(function (k) { a[k] = extra[k]; });
     return a;
@@ -859,7 +873,9 @@
     setStatus('Reading the selected clips\u2026');
     hostJson('FrameshiftSK.captureSelected()').then(function (list) {
       if (!(list instanceof Array)) list = [list];
-      var parts = joinCaptured(list), saved = [], dups = [];
+      // Every selected clip becomes its own part (joining clips that continue the same song made
+      // two selected clips come back as one part, which looked like only the first was saved).
+      var parts = list, saved = [], dups = [];
       parts.forEach(function (c) {
         var dupC = duplicateOf('part', c.path, c.inS, c.outS);
         if (dupC) { dups.push(dupC); return; }
@@ -875,7 +891,7 @@
       save();
       editing = null; view = 'sounds'; lib.activeKind = 'part';
       renderAll(); saved.forEach(function (a) { flash(a.id); ensureAnalysis(a).then(function () { afterAssetChange(a); }); });
-      var joinedNote = parts.some(function (c) { return c.joined > 1; }) ? ' (clips that continue the same song were joined)' : '';
+      var joinedNote = '';
       setStatus(saved.length === 1
         ? 'Saved ' + fmtSec(saved[0].out - saved[0].in) + ' to ' + tagOf(saved[0].tag).name + (saved[0].keys.length ? ' with ' + saved[0].keys.length + ' keyframes' : '') + joinedNote + '. Press \u270E any time to change it.'
         : 'Saved ' + saved.length + ' BGM parts from ' + list.length + ' selected clips' + joinedNote + (dups.length ? '; ' + dups.length + ' already saved, skipped' : '') + '.', 'ok');
@@ -1013,6 +1029,7 @@
     e.dataTransfer.effectAllowed = 'copy';
     e.dataTransfer.setData('com.adobe.cep.dnd.file.0', file);
     internalDrag = { file: file, a: a, label: sp.label, flat: sp.flat, keys: sp.keys };
+
     setStatus(sp.flat ? 'Drop it on the timeline. Its volume keyframes are added to the clip once it lands.' : 'Drop it on the timeline. The volume is already in the file.');
   });
   list.addEventListener('dragend', function () {
@@ -1024,7 +1041,7 @@
     var tries = 0;
     (function look() {
       tries++;
-      host('FrameshiftSK.afterDrop(' + q(d.file) + ',' + Number(d.a.color) + ',' + q(keys) + ',' + q(d.a.mode || 'media') + ')').then(function (r) {
+      host('FrameshiftSK.afterDrop(' + q(d.file) + ',' + Number(d.a.color) + ',' + q(keys) + ',' + q(d.a.mode || 'media') + ',' + q(client().name) + ')').then(function (r) {
         if (r.indexOf('OK|') === 0 && Number(r.split('|')[1]) > 0) {
           setStatus('Dropped ' + d.a.name + (d.label ? ' (' + d.label + ')' : '') + ', coloured ' + LABELS[d.a.color].name +
             (keys ? ', with its ' + keys.split(';').length + ' volume keyframes' : ' at ' + volLabel(d.a)) + colourNote(r) + '.', 'ok');
@@ -1037,12 +1054,44 @@
   // ----- BGM section selection -----
   var selDrag = null; // { id, t0, x0, moved }
 
-  list.addEventListener('pointerdown', function (e) {
+  // Frameshift: presses and drags are handled from pointer events AND mouse events. Inside
+  // Premiere's panels pointer events don't always arrive (selecting a BGM range did nothing), so
+  // whichever comes first starts the action and the other is ignored. Moves and the release are
+  // followed on the whole window, so leaving the waveform mid-drag doesn't lose them.
+  var pressAt = 0, faderMove = null;
+  function capture(el, e) { try { if (e.pointerId != null) el.setPointerCapture(e.pointerId); } catch (err) {} }
+  function onPress(e) {
+    if ((e.button || 0) !== 0) return;
+    if (Date.now() - pressAt < 400) return; // the same press, seen as both pointerdown and mousedown
+    var handled = press(e);
+    if (handled) pressAt = Date.now();
+  }
+  list.addEventListener('pointerdown', onPress);
+  list.addEventListener('mousedown', onPress);
+  // A press on something draggable may become a drag to the timeline. Tell Premiere now, before the
+  // drag starts (during a drag Premiere runs nothing), which project items already use that file,
+  // so afterDrop can tell the dropped clip apart and give it the sound's colour.
+  var dropNoteAt = 0;
+  function noteDrop(e) {
+    if ((e.button || 0) !== 0 || Date.now() - dropNoteAt < 400) return;
+    var src = e.target.closest && e.target.closest('[draggable="true"]');
+    var card = src && src.closest('.card'); if (!card) return;
+    var a = assetById(card.dataset.id);
+    if (!a || !nodeFs || (editing && editing.id === a.id)) return;
+    dropNoteAt = Date.now();
+    host('FrameshiftSK.beforeDrop(' + q(dragSpec(a).file) + ')');
+  }
+  list.addEventListener('pointerdown', noteDrop);
+  list.addEventListener('mousedown', noteDrop);
+  window.addEventListener('mousemove', function (e) { if (faderMove) faderMove(e); else if (selDrag || (kf && kf.idx != null)) moveTo(e, true); });
+  window.addEventListener('mouseup', function (e) { faderMove = null; release(e); });
+  window.addEventListener('pointerup', function (e) { faderMove = null; });
+  function press(e) {
     // Volume fader (edit mode)
     var fTrack = e.target.closest('.fader-track');
     if (fTrack && editing) {
       var fcard = fTrack.closest('.card');
-      fTrack.setPointerCapture(e.pointerId);
+      capture(fTrack, e);
       var fmove = function (ev) {
         var r = fTrack.getBoundingClientRect();
         var db = MIN_DB + clamp((ev.clientX - r.left) / r.width, 0, 1) * (MAX_DB - MIN_DB);
@@ -1050,13 +1099,13 @@
         setDraftDb(fcard, db);
       };
       fmove(e);
-      fTrack.onpointermove = fmove;
-      fTrack.onpointerup = fTrack.onpointercancel = function () { fTrack.onpointermove = null; };
-      return;
+      faderMove = fmove;
+      fTrack.onpointermove = function (ev) { if (faderMove) faderMove(ev); };
+      return true;
     }
-    var wave = e.target.closest('.wave'); if (!wave || e.button !== 0) return;
+    var wave = e.target.closest('.wave'); if (!wave) return false;
     var card = wave.closest('.card'), id = card.dataset.id, a = viewAsset(id);
-    if (!a || !a.wave || a.wave.error) return;
+    if (!a || !a.wave || a.wave.error) return false;
 
     if (editing && editing.id === id && a.kind === 'part') {
       var hit = kfHit(a, wave, e);
@@ -1066,26 +1115,37 @@
         a.keys.push(nk);
         hit = sortKeys(a, nk);
       }
-      kf = { id: id, idx: hit, hover: hit };
-      wave.setPointerCapture(e.pointerId);
+      kf = { id: id, idx: hit, hover: hit, wave: wave };
+      capture(wave, e);
       updateDraftBadges(card); refreshCard(id);
       e.preventDefault();
-      return;
+      return true;
     }
     if (a.kind === 'bgm' && !(editing && editing.id === id)) {
-      selDrag = { id: id, t0: timeAtX(a, wave, e.clientX), x0: e.clientX, moved: false, prev: bgmSel[id] };
-      wave.setPointerCapture(e.pointerId);
+      selDrag = { id: id, t0: timeAtX(a, wave, e.clientX), x0: e.clientX, moved: false, prev: bgmSel[id], wave: wave };
+      capture(wave, e);
       e.preventDefault();
+      return true;
     }
-  });
+    return false;
+  }
 
-  list.addEventListener('pointermove', function (e) {
-    var wave = e.target.closest('.wave'); if (!wave) return;
+  list.addEventListener('pointermove', function (e) { moveTo(e, false); });
+  // Where on which waveform a move is: the waveform under the pointer, or (while dragging) the one
+  // the drag started on, even when the pointer has left it.
+  function moveTo(e, fromWindow) {
+    var wave = e.target && e.target.closest ? e.target.closest('.wave') : null;
+    var dragId = selDrag ? selDrag.id : (kf && kf.idx != null ? kf.id : null);
+    if (dragId) {
+      var held = document.querySelector('.card[data-id="' + dragId + '"] .wave');
+      if (held) wave = held;
+    } else if (fromWindow) return;
+    if (!wave) return;
     var card = wave.closest('.card'), id = card.dataset.id, a = viewAsset(id);
     if (!a) return;
     // Keyframe drag / hover
     if (editing && editing.id === id && a.kind === 'part') {
-      if (kf && kf.id === id && kf.idx != null && (e.buttons & 1)) {
+      if (kf && kf.id === id && kf.idx != null) {
         var k = a.keys[kf.idx], pt = kfPoint(a, wave, e);
         var lo = kf.idx > 0 ? a.keys[kf.idx - 1][0] + 0.01 : 0;
         var hi = kf.idx < a.keys.length - 1 ? a.keys[kf.idx + 1][0] - 0.01 : partLen(a);
@@ -1116,9 +1176,10 @@
       if (!hover[id]) { hover[id] = 1; refreshCard(id); }
       schedulePrepare(a);
     }
-  });
+  }
 
-  list.addEventListener('pointerup', function (e) {
+  list.addEventListener('pointerup', release);
+  function release(e) {
     if (kf && kf.idx != null) {
       var card = document.querySelector('.card[data-id="' + kf.id + '"]');
       kf = { id: kf.id, idx: null, hover: kf.idx };
@@ -1127,7 +1188,7 @@
     }
     if (selDrag) {
       var s = selDrag; selDrag = null;
-      var a = assetById(s.id), wave = e.target.closest('.wave');
+      var a = assetById(s.id), wave = e.target && e.target.closest ? e.target.closest('.wave') : null;
       if (!a) return;
       if (!s.moved) {
         // A click: listen from here (inside the selection: to its end).
@@ -1140,7 +1201,7 @@
         if (bgmSel[s.id]) schedulePrepare(a);
       }
     }
-  });
+  }
 
   list.addEventListener('pointerout', function (e) {
     var wave = e.target.closest('.wave'); if (!wave) return;
@@ -1845,7 +1906,7 @@
   // What Premiere says about the clip's colour after placing (the jsx returns it as the last field).
   function colourNote(r) {
     var p = String(r || '').split('|'), c = p[p.length - 1];
-    if (c === 'nolabel') return ' (this Premiere can\u2019t colour timeline clips from a script)';
+    if (c === 'nolabel') return ' (couldn\u2019t colour the clip; set its label by hand)';
     if (/^got:\d+$/.test(c)) return ' (Premiere shows it as ' + (LABELS[Number(c.slice(4))] || { name: '#' + c.slice(4) }).name + ')';
     return '';
   }
