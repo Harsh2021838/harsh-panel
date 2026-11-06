@@ -187,7 +187,7 @@
     var arr = function (a) { a.numItems = a.length; return a; };
     function textComp(t) { return { matchName: "AE.ADBE Text", displayName: "Text", properties: arr([{ displayName: "Source Text", getValue: function () { return JSON.stringify({ textEditValue: t }); } }]) }; }
     function clip(name, at, comps, mgt, item, dur) {
-      return { name: name, start: { ticks: String(Math.round(254016000000 * at)), seconds: at }, end: { ticks: String(Math.round(254016000000 * (at + (dur || 3)))) },
+      return { name: name, start: { ticks: String(Math.round(254016000000 * at)), seconds: at }, end: { ticks: String(Math.round(254016000000 * (at + (dur || 3)))) }, inPoint: { ticks: "0" },
         components: arr([{ matchName: "AE.ADBE Motion", displayName: "Motion", properties: arr([]) }].concat(comps || [])),
         getMGTComponent: function () { return mgt ? { properties: arr(mgt.map(function (p) { return { displayName: p[0], getValue: function () { return p[1]; } }; })) } : null; },
         projectItem: item || { name: name, getMediaPath: function () { return ""; }, isSequence: function () { return false; } },
@@ -195,9 +195,9 @@
     }
     function seq(name, tracks) {
       var vt = arr(tracks.map(function (c) { return { clips: arr(c) }; })); vt.numTracks = vt.length;
-      var at = arr([{ clips: arr([]) }, { clips: arr([]) }]); at.numTracks = 2;
+      var at = arr([{ clips: arr(name === "Main Edit 16x9" ? [{ name: "Interview_A.mp4", start: { ticks: String(254016000000 * 2 / 24) }, end: { ticks: String(254016000000 * (20 + 2 / 24)) }, inPoint: { ticks: "0" }, projectItem: itemA, setSelected: function () {} }] : []) }, { clips: arr([]) }]); at.numTracks = 2;
       return { name: name, sequenceID: name + "-id", timebase: "10584000000", videoTracks: vt, end: String(254016000000 * 41.5),
-        projectItem: { nodeId: name + "-node" }, getSelection: function () { return []; },
+        projectItem: { nodeId: name + "-node" }, getSelection: function () { return []; }, markers: { createMarker: function (t) { var m = { setColorByIndex: function () {} }; setTimeout(function () { log("Premiere added a marker at " + tcAt(t) + ": " + m.name); }, 0); return m; } },
         audioTracks: at, getPlayerPosition: function () { return { ticks: String(254016000000 * 12) }; },
         importMGT: function (p, t, v) { log("Premiere placed \u201C" + p.split("/").pop() + "\u201D at the playhead (00:00:12:00) on V" + (v + 1) + "."); return {}; },
         setPlayerPosition: function (t) { log("Premiere moved the playhead to " + tcAt(Number(t) / 254016000000) + " in “" + name + "” and selected the clip."); } };
@@ -206,11 +206,14 @@
     var ghost = { type: 1, name: "Old Title Card/Brightline_GFX.aep", nodeId: "ghost-1", treePath: "\\Brightline_Launch_v4.prproj\\AE Comps\\Old Title Card/Brightline_GFX.aep",
       getMediaPath: function () { return "/Users/harsh/Projects/Brightline/Brightline_GFX.aep"; }, isSequence: function () { return false; },
       select: function () { log("Premiere selected \u201COld Title Card\u201D in the AE Comps bin of the Project panel."); } };
+    var itemA = { name: "Interview_A.mp4", nodeId: "ia-1", getMediaPath: function () { return "/Footage/Interview_A.mp4"; }, isSequence: function () { return false; } };
+    var blackItem = { name: "Black Video", nodeId: "bv-1", getMediaPath: function () { return ""; }, isSequence: function () { return false; } };
     var seqs = arr([
       seq("Main Edit 16x9", [
-        [clip("Interview_A.mp4", 0, null, null, null, 20), clip("Interview_B.mp4", 20 + 3 / 24, null, null, null, 21.375)],
+        [clip("Interview_A.mp4", 0, null, null, itemA, 20), clip("Interview_B.mp4", 20 + 3 / 24, null, null, null, 21.375)],
         [clip("Graphic", 2, [textComp("Introducing the new Brightline app")]), clip("Graphic", 9.5, [textComp("Your money,​ sorted in minutes")]),
-         clip("Lower Third", 15, [], [["Name", "Priya Raman"], ["Title", "Head of Prodcut"], ["Opacity", 100]])],
+         clip("Lower Third", 15, [], [["Name", "Priya Raman"], ["Title", "Head of Prodcut"], ["Opacity", 100]]),
+         clip("B-roll_Phone.mp4", 20 + 1 / 24, null, null, null, 1.9), clip("Black Video", 30, null, null, blackItem, 0.5)],
         [clip("Graphic", 22, [textComp("Recieve instant alerts")], null, null, 9 - 2 / 24), clip("End Tag", 38.5, [], null, aep), clip("Old Title Card", 31, [], null, ghost, 7.5 - 1 / 24)]
       ]),
       seq("Reel 9x16", [

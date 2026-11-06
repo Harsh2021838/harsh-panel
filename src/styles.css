@@ -526,3 +526,16 @@ input[type="checkbox"] { accent-color: var(--mark); margin: 0; width: 13px; heig
 .gap-rows .row-where { gap: 7px; }
 .gap-detail { color: var(--ink); font-size: 12.5px; line-height: 1.45; word-break: break-word; }
 .gap-where { display: flex; gap: 7px; color: var(--ink-2); font-size: 11.5px; min-width: 0; }
+.look-for { margin: 2px 0 0; }
+.look-for .chip:not(.on) { opacity: 0.6; }
+.auto-go { margin-top: 2px; }
+.gap-pic.stack { flex-direction: column; justify-content: center; gap: 3px; }
+.gap-pic .lane { display: flex; align-items: center; width: 100%; height: 9px; }
+.gap-pic .lane .clip { height: 9px; }
+.gap-pic .lane .cut { flex: none; width: 2px; height: 9px; }
+.gap-pic .hole.thin { height: 9px; margin: 0; box-shadow: none; }
+.gap-pic.sync .lane:last-child .clip { background: rgba(107, 214, 174, 0.45); }
+.gap-pic.sync .hole.thin { background: repeating-linear-gradient(135deg, rgba(107, 214, 174, 0.7) 0 2px, transparent 2px 4px); }
+.gap-pic.cut .hole.thin { background: repeating-linear-gradient(135deg, rgba(242, 178, 92, 0.8) 0 2px, transparent 2px 4px); }
+.gap-pic.solo .bad-clip { flex: none; width: 26px; height: 14px; margin: 0 2px; border-radius: 3px; background: #000; box-shadow: inset 0 0 0 1px rgba(255, 123, 107, 0.8); color: var(--bad); font-size: 10px; font-weight: 700; display: grid; place-items: center; font-style: normal; }
+.look-for .chip.on::before { content: "\2713"; margin-right: 5px; color: var(--good); font-weight: 700; }

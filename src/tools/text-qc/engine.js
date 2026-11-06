@@ -259,6 +259,16 @@ function classify(iss, bad) {
   return "grammar";
 }
 
+// True when a "should start with a capital" hit is really the second half of a split sentence:
+// at the start of the text (after quotes, dashes or dots), or after a line break whose line
+// doesn't end a sentence.
+function splitSentence(text, offset) {
+  var before = text.slice(0, offset);
+  if (/^[\s"'\u201C\u2018(\[\-\u2013\u2014\u2026.,:;]*$/.test(before)) return true;
+  var m = /(\S)[^\S\r\n\u0003\u2028\u2029]*[\r\n\u0003\u2028\u2029][\s"'\u201C\u2018\-\u2013\u2014\u2026]*$/.exec(before);
+  return !!(m && !/[.!?\u2026]/.test(m[1]));
+}
+
 // Turn per-text results into issue groups (same word, same text = one group, many places).
 function buildGroups(items, results, dict) {
   var groups = {}, list = [];
@@ -270,7 +280,11 @@ function buildGroups(items, results, dict) {
       if (m.ruleId !== "HARSH_INVISIBLE" && dict[bad.toLowerCase()]) return;
       // A layer or caption that starts in lower case is usually the second line of a sentence
       // split across layers ("...an entrepreneur" / "isn't a working solution,"). Don't flag it.
-      if (/UPPERCASE_SENTENCE_START/i.test(m.ruleId) && !/\S/.test(it.text.slice(0, m.offset))) return;
+      // The same goes for a sentence broken over two lines inside one layer to fit the frame:
+      // a line that follows one without . ! or ? is the same sentence, so no capital is needed.
+      if (/UPPERCASE_SENTENCE_START/i.test(m.ruleId) && splitSentence(it.text, m.offset)) return;
+      // On-screen lines rarely end in a full stop; don't ask for one.
+      if (/PUNCTUATION_PARAGRAPH_END|MISSING_SENTENCE_TERMINATOR/i.test(m.ruleId)) return;
       var cat = classify(m, bad);
       var key = cat + "|" + m.offset + "|" + m.ruleId + "|" + it.text;
       var g = groups[key];

@@ -43,7 +43,10 @@
         for (var c = 0; c < track.clips.numItems; c++) {
             var clip = track.clips[c], off = false;
             try { off = !!clip.disabled; } catch (e) {}
-            out.push({ i: c, name: clip.name, start: ticks(clip.start), end: ticks(clip.end), off: off });
+            var item = null, node = "", inPt = null;
+            try { item = clip.projectItem; node = item ? String(item.nodeId || item.name) : ""; } catch (e) {}
+            try { inPt = clip.inPoint ? ticks(clip.inPoint) : null; } catch (e) {}
+            out.push({ i: c, name: clip.name, start: ticks(clip.start), end: ticks(clip.end), off: off, item: item, node: node, inPt: inPt });
         }
         out.sort(function (a, b) { return a.start - b.start; });
         return out;
@@ -66,11 +69,86 @@
         var seqEnd = 0;
         try { seqEnd = Number(seq.end); } catch (e) {}
         var fps = TICKS / frame;
+        var checks = a.checks || { gaps: true };
         var kinds = [["V", seq.videoTracks]];
         if (a.audio) kinds.push(["A", seq.audioTracks]);
+        if (!checks.gaps) kinds = [];
+        var V = [], A = [];
+        for (var vt = 0; vt < seq.videoTracks.numTracks; vt++) V.push(clipList(seq.videoTracks[vt]));
+        try { for (var at = 0; at < seq.audioTracks.numTracks; at++) A.push(clipList(seq.audioTracks[at])); } catch (e) {}
+        function issue(kind, track, trackName, from, to, prev, next, extra) {
+            var g = { app: "PPRO", container: seq.name, containerId: seq.sequenceID, fps: fps, trackKind: "V", track: track, trackName: trackName,
+                kind: kind, frames: Math.round(Math.abs(to - from) / frame), time: from / TICKS, startTicks: String(from), endTicks: String(to),
+                prev: prev ? prev.name : "", prevIndex: prev ? prev.i : -1, next: next ? next.name : "", nextIndex: next ? next.i : -1, black: false,
+                key: seq.sequenceID + ":" + kind + ":" + trackName + ":" + from };
+            for (var x in extra) g[x] = extra[x];
+            out.push(g);
+        }
+        // Cuts on two video tracks that are a few frames apart (a flash of the wrong shot).
+        if (checks.cuts) {
+            var cuts = [];
+            for (var ct = 0; ct < V.length; ct++) {
+                var cl = [];
+                for (var ci = 0; ci < V[ct].length; ci++) {
+                    var cc = V[ct][ci];
+                    if (cc.off || /adjustment layer/i.test(cc.name)) continue;
+                    if (cc.start > frame / 2) cl.push({ at: cc.start, clip: cc });
+                    if (!seqEnd || seqEnd - cc.end > frame / 2) cl.push({ at: cc.end, clip: cc });
+                }
+                cuts.push(cl);
+            }
+            var said = {};
+            for (var ta = 0; ta < cuts.length; ta++) for (var tb = ta + 1; tb < cuts.length; tb++) {
+                for (var ia = 0; ia < cuts[ta].length; ia++) {
+                    var ca = cuts[ta][ia], best = null, bestD = max;
+                    for (var ib = 0; ib < cuts[tb].length; ib++) {
+                        var d = Math.abs(cuts[tb][ib].at - ca.at);
+                        if (d < frame / 2) { best = null; bestD = -1; break; } // lines up with a cut on that track
+                        if (d <= bestD) { best = cuts[tb][ib]; bestD = d; }
+                    }
+                    if (!best) continue;
+                    if (said[tb + "@" + best.at]) continue; // that cut is already in a pair
+                    said[tb + "@" + best.at] = true;
+                    var from = Math.min(ca.at, best.at), to = Math.max(ca.at, best.at);
+                    var id = ta + ":" + tb + ":" + from + ":" + to;
+                    if (said[id]) continue;
+                    said[id] = true;
+                    issue("cut", ta, "V" + (ta + 1) + " and V" + (tb + 1), from, to, ca.clip, best.clip, { trackB: tb });
+                }
+            }
+        }
+        // Video and its own audio drifted out of sync.
+        if (checks.sync) {
+            for (var sv = 0; sv < V.length; sv++) for (var si = 0; si < V[sv].length; si++) {
+                var vc = V[sv][si];
+                if (vc.inPt === null || !vc.node) continue;
+                var near = null, nearD = -1, nearT = -1;
+                for (var sa = 0; sa < A.length; sa++) for (var sj = 0; sj < A[sa].length; sj++) {
+                    var ac = A[sa][sj];
+                    if (ac.node !== vc.node || ac.inPt === null) continue;
+                    if (ac.end <= vc.start || ac.start >= vc.end) continue; // not playing at the same time
+                    var drift = (vc.start - vc.inPt) - (ac.start - ac.inPt);
+                    if (nearD < 0 || Math.abs(drift) < Math.abs(nearD)) { near = ac; nearD = drift; nearT = sa; }
+                }
+                if (!near || Math.abs(nearD) < frame / 2) continue;
+                issue("sync", sv, "V" + (sv + 1) + " and A" + (nearT + 1), vc.start, vc.start + Math.abs(nearD), vc, near,
+                    { audioEarly: nearD > 0, audioTrack: nearT });
+            }
+        }
+        // Black Video clips and offline media.
+        if (checks.black) {
+            for (var bt = 0; bt < V.length; bt++) for (var bi = 0; bi < V[bt].length; bi++) {
+                var bc = V[bt][bi], why = "";
+                if (bc.off) continue;
+                try { if (bc.item && bc.item.isOffline && bc.item.isOffline()) why = "offline"; } catch (e) {}
+                if (!why && bc.item && /^black video/i.test(String(bc.item.name))) why = "blackvideo";
+                if (!why) continue;
+                issue(why, bt, "V" + (bt + 1), bc.start, bc.end, bc, null, {});
+            }
+        }
         for (var k = 0; k < kinds.length; k++) {
             var letter = kinds[k][0], tracks = kinds[k][1], all = [];
-            for (var t = 0; t < tracks.numTracks; t++) all.push(clipList(tracks[t]));
+            all = letter === "V" ? V : A;
             for (t = 0; t < all.length; t++) {
                 var list = all[t], below = all.slice(0, t);
                 if (!list.length) continue;
@@ -122,6 +200,22 @@
     }
     function prTracks(seq, g) { return g.trackKind === "A" ? seq.audioTracks : seq.videoTracks; }
 
+    // Drop a coloured marker on the sequence for each problem.
+    api.prMarkers = function (a) {
+        var seq = seqById(a.containerId), added = 0;
+        for (var i = 0; i < a.items.length; i++) {
+            var it = a.items[i];
+            try {
+                var m = seq.markers.createMarker(Number(it.time));
+                try { m.name = it.name; } catch (e1) {}
+                try { m.comments = it.comment; } catch (e2) {}
+                try { m.setColorByIndex(it.color); } catch (e3) {}
+                added++;
+            } catch (e) {}
+        }
+        return { added: added };
+    };
+
     api.prJump = function (g) {
         var seq = seqById(g.containerId);
         app.project.openSequence(seq.sequenceID);
@@ -131,8 +225,9 @@
             var sel = seq.getSelection();
             for (var i = 0; i < sel.length; i++) sel[i].setSelected(false, false);
             var tr = prTracks(seq, g)[g.track];
+            var tr2 = g.kind === "cut" ? seq.videoTracks[g.trackB] : g.kind === "sync" ? seq.audioTracks[g.audioTrack] : tr;
             if (g.prevIndex >= 0) tr.clips[g.prevIndex].setSelected(true, true);
-            if (g.nextIndex >= 0) tr.clips[g.nextIndex].setSelected(true, true);
+            if (g.nextIndex >= 0) tr2.clips[g.nextIndex].setSelected(true, true);
         } catch (e) {}
         return true;
     };

@@ -9,6 +9,7 @@ import {
 } from "./engine.js";
 
 const isAE = hostApp === "AEFT";
+const isDone = (v) => v === "fixed" || v === "corrected";
 const SCOPES = isAE
   ? [["all", "All comps"], ["selected", "Selected"], ["folders", "Folders"], ["batch", "Other projects"]]
   : [["all", "All sequences"], ["active", "Open sequence"]];
@@ -110,6 +111,8 @@ export default function TextQC({ report = () => {} }) {
   };
   const [showIgnored, setShowIgnored] = useState(false);
   const [showManual, setShowManual] = useState(false);
+  const [autoGo, setAutoGo] = useState(() => lsGet("autoGo", true));
+  useEffect(() => { lsSet("autoGo", autoGo); }, [autoGo]);
   const manualRef = useRef(null);
 
   function loadFolders() {
@@ -258,7 +261,7 @@ export default function TextQC({ report = () => {} }) {
   const busy = phase === "reading" || phase === "checking";
   const live = groups.filter((g) => marks[g.id] !== "ignored");
   const ignoredGroups = groups.filter((g) => marks[g.id] === "ignored");
-  const open_ = live.filter((g) => marks[g.id] !== "fixed");
+  const open_ = live.filter((g) => !isDone(marks[g.id]));
   const counts = {}; CATS.forEach((c) => { counts[c.id] = 0; });
   // Warnings from the last check: plain notes, and After Effects clips that need a look by hand.
   const manual = { notes: [], groups: [], count: 0 };
@@ -272,9 +275,11 @@ export default function TextQC({ report = () => {} }) {
   const ql = q.trim().toLowerCase();
   const shown = live.filter((g) => cats.indexOf(g.cat) !== -1 && (!ql ||
     (g.text + " " + g.places.map((p) => p.container + " " + p.layer).join(" ")).toLowerCase().indexOf(ql) !== -1));
-  const queue = shown.filter((g) => marks[g.id] !== "fixed");
+  const queue = shown.filter((g) => !isDone(marks[g.id]));
   const pct = prog.total ? Math.round((prog.done / prog.total) * 100) : null;
   const cur = review !== null ? queue[Math.min(review, queue.length - 1)] : null;
+  // Go to each mistake as it comes up in review.
+  useEffect(() => { if (cur && autoGo && cur.places[0].containerId) jump(cur.places[0]); }, [cur && cur.id, autoGo]);
 
   useEffect(() => { report(busy ? { running: true } : run ? { count: total, at: run.finished.getTime() } : null); }, [busy, run, total]);
   useEffect(() => { if (review !== null && !queue.length) setReview(null); }, [queue.length, review]);
@@ -290,6 +295,7 @@ export default function TextQC({ report = () => {} }) {
       else if (e.key === "Enter" && isAE && cur.suggestions.length) { e.preventDefault(); fix(cur, cur.suggestions[0]); }
       else if (e.key.toLowerCase() === "g" && cur.places[0].containerId) jump(cur.places[0]);
       else if (e.key.toLowerCase() === "i") mark([cur.id], "ignored");
+      else if (e.key.toLowerCase() === "c") mark([cur.id], "corrected");
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -300,9 +306,9 @@ export default function TextQC({ report = () => {} }) {
     : scope === "active" ? "The sequence open in the timeline, including sequences nested in it." : "Every sequence in the project.";
 
   function Actions({ g, big }) {
-    const fixed = marks[g.id] === "fixed";
+    const fixed = isDone(marks[g.id]);
     const more = g.places.length - 1;
-    if (fixed) return <div className="acts"><span className="fixed">Changed</span></div>;
+    if (fixed) return <div className="acts"><span className="fixed">{marks[g.id] === "fixed" ? "Changed" : "Corrected"}</span>{marks[g.id] === "corrected" && <button className="ghost tight" onClick={() => mark([g.id], null)}>Undo</button>}</div>;
     return (
       <div className={"acts" + (big ? " big" : "")}>
         {g.suggestions.map((s, i) => {
@@ -312,6 +318,7 @@ export default function TextQC({ report = () => {} }) {
             : <span key={i} className="sugg-text">Use <b>{label}</b></span>;
         })}
         {(g.cat === "unknown" || g.cat === "typo") && <button className="ghost tight" onClick={() => addWord(g)}>Add to dictionary</button>}
+        <button className="ghost tight" onClick={() => mark([g.id], "corrected")} title="You fixed it yourself">Corrected</button>
         <button className="ghost tight" onClick={() => mark([g.id], "ignored")}>Ignore</button>
       </div>
     );
@@ -338,7 +345,8 @@ export default function TextQC({ report = () => {} }) {
           <button className="ghost" disabled={idx === 0} onClick={() => setReview(idx - 1)}><Back size={14} /> Previous</button>
           <button className="ghost" disabled={idx >= queue.length - 1} onClick={() => setReview(idx + 1)}>Next <Forward size={14} /></button>
         </div>
-        <p className="keys">Keys: <kbd>&larr;</kbd> <kbd>&rarr;</kbd> move{isAE ? <>, <kbd>Enter</kbd> use the first suggestion</> : null}, <kbd>G</kbd> go to, <kbd>I</kbd> ignore, <kbd>Esc</kbd> close.</p>
+        <label className="check-inline auto-go"><input type="checkbox" checked={autoGo} onChange={() => setAutoGo(!autoGo)} /> Go to each one automatically</label>
+        <p className="keys">Keys: <kbd>&larr;</kbd> <kbd>&rarr;</kbd> move{isAE ? <>, <kbd>Enter</kbd> use the first suggestion</> : null}, <kbd>G</kbd> go to, <kbd>C</kbd> corrected, <kbd>I</kbd> ignore, <kbd>Esc</kbd> close.</p>
         {err && <p className="msg bad">{err}</p>}
         {note && <p className="msg good">{note}</p>}
       </div>
@@ -461,6 +469,9 @@ export default function TextQC({ report = () => {} }) {
               <button className="ghost" onClick={exportReport}>Export report</button>
             </div>
           )}
+          {total > 0 && (
+            <label className="check-inline auto-go"><input type="checkbox" checked={autoGo} onChange={() => setAutoGo(!autoGo)} /> Go to each mistake when I open it</label>
+          )}
         </section>
       )}
 
@@ -484,17 +495,17 @@ export default function TextQC({ report = () => {} }) {
           {!shown.length && <p className="help">Nothing in the categories you picked. Turn on more above.</p>}
           <ol className="rows">
             {shown.slice(0, limit).map((g) => {
-              const first = g.places[0], fixed = marks[g.id] === "fixed", more = g.places.length - 1, isOpen = !!open[g.id];
+              const first = g.places[0], fixed = isDone(marks[g.id]), more = g.places.length - 1, isOpen = !!open[g.id];
               const cat = CAT_BY_ID[g.cat];
               return (
                 <li key={g.id} className={"row" + (fixed ? " done" : "") + (isOpen ? " open" : "")} style={{ "--c": cat.color }}>
-                  <button className="row-head" aria-expanded={isOpen} onClick={() => setOpen({ ...open, [g.id]: !isOpen })}>
+                  <button className="row-head" aria-expanded={isOpen} onClick={() => { setOpen({ ...open, [g.id]: !isOpen }); if (!isOpen && autoGo && first.containerId) jump(first); }}>
                     <i className="dot" aria-hidden="true" />
                     <span className="row-main">
                       <span className="row-word">
                         <span className="bad">{g.cat === "garbage" ? cat.label.replace(/s$/, "") : g.bad}</span>
                         {g.suggestions.length > 0 && g.suggestions[0] !== "" && g.cat !== "garbage" && <span className="to"> → {g.suggestions[0]}</span>}
-                        {fixed && <span className="fixed"> Changed</span>}
+                        {fixed && <span className="fixed"> {marks[g.id] === "fixed" ? "Changed" : "Corrected"}</span>}
                       </span>
                       <span className="row-where">
                         {first.kind && <span className={"tag " + first.kind}>{KIND[first.kind]}</span>}
