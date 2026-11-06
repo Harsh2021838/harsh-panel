@@ -14,7 +14,7 @@ import GapQC from "./tools/gap-qc/GapQC.jsx";
 import CompVault from "./tools/comp-vault/CompVault.jsx";
 import "./styles.css";
 
-const VERSION = "2.13.2";
+const VERSION = "2.14.0";
 
 // The four sections. Add a tool by putting it in a section's `tools` list
 // (or drop a plugin file into /plugins, see plugins/README.md).
@@ -100,7 +100,7 @@ function App() {
   // Install, but only once Premiere has finished every command Harsh sent it: reloading the panel
   // while a command is still running inside the app can crash it.
   const install = (u) => {
-    setUpdating("Installing Harsh " + u.version + "\u2026");
+    setUpdating("Installing Frameshift " + u.version + "\u2026");
     hostIdle()
       .then(() => installUpdate(u, VERSION))
       .then(() => hostIdle())
@@ -149,7 +149,7 @@ function App() {
   return (
     <div className="app">
       <header className="top">
-        <img className="mark" src="../assets/logo.png" width="18" height="18" alt="Harsh" title={"Harsh v" + VERSION} />
+        <img className="mark" src="../assets/logo.png" width="18" height="18" alt="Frameshift" title={"Frameshift v" + VERSION} />
         <div className="top-text">
           <span className="top-project" title={project}>{project || "No project open"}</span>
           <span className="top-app">{hostName}</span>
@@ -179,11 +179,11 @@ function App() {
         <div className={"banner" + (updated && !update && !updating ? " done" : "")} role="status">
           {updating ? <span className="grow">{updating}</span>
             : update ? (<>
-              <span className="grow">Harsh {update.version} is ready.</span>
+              <span className="grow">Frameshift {update.version} is ready.</span>
               <button className="ghost tight strong" onClick={() => install(update)}>Install now</button>
               <button className="ghost tight" onClick={() => setUpdate(null)}>Later</button>
             </>) : (<>
-              <span className="grow">Updated to Harsh {updated.to}. If anything looks odd, restart {hostName}.</span>
+              <span className="grow">Updated to Frameshift {updated.to}. If anything looks odd, restart {hostName}.</span>
               <button className="icon-btn small" onClick={() => setUpdated(null)} aria-label="Dismiss">&times;</button>
             </>)}
         </div>

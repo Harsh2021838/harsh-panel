@@ -23,11 +23,11 @@
     H.plugins.forEach(function (p) {
       try {
         var folder = folders.filter(function (f) { return f.id === p.folder; })[0];
-        if (!folder) return console.error("Harsh plugin: unknown folder", p.folder);
+        if (!folder) return console.error("Frameshift plugin: unknown folder", p.folder);
         var tool = Object.assign({ hosts: p.hosts }, p.tool);
         tool.Component = p.create(React, H);
         folder.tools.push(tool);
-      } catch (e) { console.error("Harsh plugin failed:", p && p.tool && p.tool.id, e); }
+      } catch (e) { console.error("Frameshift plugin failed:", p && p.tool && p.tool.id, e); }
     });
     return folders;
   };
@@ -39,5 +39,5 @@
       .filter(function (n) { return /\.js$/i.test(n) && n.charAt(0) !== "_" && n.toLowerCase() !== "library.js"; })
       .sort()
       .forEach(function (n) { document.write('<script src="../plugins/' + encodeURIComponent(n) + '"><\/script>'); });
-  } catch (e) { console.error("Harsh: could not list plugins", e); }
+  } catch (e) { console.error("Frameshift: could not list plugins", e); }
 })();

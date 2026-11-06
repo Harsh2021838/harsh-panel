@@ -1,7 +1,7 @@
-// The Harsh Library: one folder that holds everything the panel saves, so you can
+// The Frameshift Library: one folder that holds everything the panel saves, so you can
 // choose where it lives (Settings), back it up, or share it on a team drive.
 //
-//   Harsh Library/
+//   Frameshift Library/
 //     Clients/<Client name>/client.json    Client DNA: brand name, founder, website, colours, fonts, notes
 //     Clients/<Client name>/<logo file>
 //     Clients/<Client name>/Assets/         that client's assets
@@ -27,8 +27,28 @@ export async function libraryDir() {
   if (root) return root;
   let saved = null;
   try { saved = localStorage.getItem(LS); } catch (e) {}
+  // Opened in the other app after this one already renamed the folder: follow it.
+  if (saved && !fs.existsSync(saved) && /Harsh Library$/.test(saved)) {
+    const moved = saved.replace(/Harsh Library$/, "Frameshift Library");
+    if (fs.existsSync(moved)) { saved = moved; try { localStorage.setItem(LS, moved); } catch (e) {} }
+  }
   if (saved && fs.existsSync(saved)) root = saved;
-  else root = path.join((await info("info")).documents, "Harsh Library");
+  else root = path.join((await info("info")).documents, "Frameshift Library");
+  // The panel was called Harsh until 2.14; its folder was "Harsh Library". Rename it once
+  // (same disk, so instant) unless a Frameshift Library is already there.
+  if (path.basename(root) === "Frameshift Library" || path.basename(root) === "Harsh Library") {
+    const oldDir = path.join(path.dirname(root), "Harsh Library"), newDir = path.join(path.dirname(root), "Frameshift Library");
+    try {
+      if (fs.existsSync(oldDir) && !fs.existsSync(newDir)) {
+        fs.renameSync(oldDir, newDir);
+        try { fs.writeFileSync(path.join(newDir, "Renamed from Harsh Library.txt"), "This folder was called \"Harsh Library\" until " + new Date().toISOString().slice(0, 10) + ". Nothing inside changed.\n"); } catch (e) {}
+      }
+      if (fs.existsSync(newDir)) {
+        root = newDir;
+        if (saved) { try { localStorage.setItem(LS, newDir); } catch (e) {} }
+      }
+    } catch (e) { console.error("Frameshift: renaming Harsh Library", e); }
+  }
   ensure(root);
   ensure(path.join(root, "Clients"));
   ["Assets", "SFX", "Compositions"].forEach((k) => ensure(path.join(root, "Common", k)));
@@ -243,7 +263,7 @@ export async function libraryStats() {
 
 /** Copy the whole library into a dated folder inside `dest`. */
 export async function backupLibrary(dest) {
-  const out = freeName(dest, "Harsh Library backup " + stamp());
+  const out = freeName(dest, "Frameshift Library backup " + stamp());
   copyDir(await libraryDir(), out);
   return out;
 }
@@ -257,25 +277,25 @@ export function exportClient(client, dest) {
 
 /** Bring in a client folder exported from another computer (it must contain client.json). */
 export async function importClient(src) {
-  if (!fs.existsSync(path.join(src, "client.json"))) throw new Error("That folder isn\u2019t a Harsh client. Choose the folder that has client.json inside.");
+  if (!fs.existsSync(path.join(src, "client.json"))) throw new Error("That folder isn\u2019t a Frameshift client. Choose the folder that has client.json inside.");
   const out = freeName(path.join(await libraryDir(), "Clients"), path.basename(src));
   copyDir(src, out);
   return path.basename(out);
 }
 
-/** Does this folder already hold a Harsh Library? */
+/** Does this folder already hold a Frameshift (or Harsh) Library? */
 export function looksLikeLibrary(dir) { return fs.existsSync(path.join(dir, "Clients")) || fs.existsSync(path.join(dir, "Common")); }
 
 /**
  * Point the panel at another folder.
  *   mode "use":  the folder already is a library (or should start empty)
- *   mode "copy": copy the current library into <dir>/Harsh Library and use that
+ *   mode "copy": copy the current library into <dir>/Frameshift Library and use that
  * The old folder is left untouched.
  */
 export async function moveLibrary(dir, mode) {
   let target = dir;
   if (mode === "copy") {
-    target = path.basename(dir) === "Harsh Library" ? dir : freeName(dir, "Harsh Library");
+    target = /^(Frameshift|Harsh) Library$/.test(path.basename(dir)) ? dir : freeName(dir, "Frameshift Library");
     copyDir(await libraryDir(), target);
   }
   setLibraryDir(target);

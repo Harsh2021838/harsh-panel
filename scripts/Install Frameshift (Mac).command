@@ -1,12 +1,12 @@
 #!/bin/bash
-# Harsh panel installer for macOS. Double-click (first time: right-click > Open).
+# Frameshift panel installer for macOS. Double-click (first time: right-click > Open).
 # Installs for this user only, so no password is needed.
 cd "$(dirname "$0")"
 SRC="$PWD/com.harsh.panel"
 DEST="$HOME/Library/Application Support/Adobe/CEP/extensions/com.harsh.panel"
 
 echo ""
-echo "  Installing the Harsh panel for Premiere Pro and After Effects"
+echo "  Installing the Frameshift panel for Premiere Pro and After Effects"
 echo ""
 
 if pgrep -f "MacOS/Adobe Premiere Pro" >/dev/null || pgrep -f "MacOS/After Effects" >/dev/null; then
@@ -32,7 +32,7 @@ for v in 9 10 11 12; do
 done
 killall cfprefsd 2>/dev/null
 
-echo "  Done. Open Premiere Pro or After Effects, then Window > Extensions > Harsh."
+echo "  Done. Open Premiere Pro or After Effects, then Window > Extensions > Frameshift."
 echo "  To update later, run the new installer the same way."
 echo ""
 read -r -p "  Press Enter to close." _

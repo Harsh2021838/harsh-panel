@@ -100,7 +100,7 @@ function postForm(url, params, timeoutMs) {
       headers: {
         "Content-Type": "application/x-www-form-urlencoded",
         "Content-Length": Buffer.byteLength(body), "Accept": "application/json",
-        "User-Agent": "Harsh-TextQC"
+        "User-Agent": "Frameshift-TextQC"
       }
     }, function (res) {
       var chunks = [];

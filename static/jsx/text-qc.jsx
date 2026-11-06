@@ -1,4 +1,4 @@
-// Harsh - Text QC, host side (After Effects + Premiere Pro).
+// Frameshift - Text QC, host side (After Effects + Premiere Pro).
 // ExtendScript is ES3: plain loops, no Array helpers. Keep this file ASCII.
 // The panel calls: $.HarshTextQC.call("name", {args}) and gets a JSON string.
 (function () {
@@ -217,7 +217,7 @@
         var td = a.keyIndex ? st.keyValue(a.keyIndex) : st.value;
         var t = td.text;
         if (t.substr(a.offset, a.length) !== a.expected) throw new Error("The text changed since the scan. Run the check again.");
-        app.beginUndoGroup("Harsh Text QC fix");
+        app.beginUndoGroup("Frameshift Text QC fix");
         try {
             td.text = t.substr(0, a.offset) + a.replacement + t.substr(a.offset + a.length);
             if (a.keyIndex) st.setValueAtKey(a.keyIndex, td);

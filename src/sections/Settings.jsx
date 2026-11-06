@@ -16,7 +16,7 @@ const LAYOUT = [
   ["_Removed", "Anything you remove, so nothing is ever lost."],
 ];
 
-// Long paths keep their end (the part that tells you where it is): "\u2026/Dropbox/Team/Harsh Library".
+// Long paths keep their end (the part that tells you where it is): "\u2026/Dropbox/Team/Frameshift Library".
 const shortPath = (p) => (p.length > 44 ? "\u2026" + p.slice(-43) : p);
 
 export default function Settings({ clients, active, onLibraryChanged, openGuide, version }) {
@@ -45,7 +45,7 @@ export default function Settings({ clients, active, onLibraryChanged, openGuide,
   }
 
   async function install(u) {
-    setBusy("Installing Harsh " + u.version + "\u2026");
+    setBusy("Installing Frameshift " + u.version + "\u2026");
     await new Promise((r) => setTimeout(r, 30));
     const backup = await installUpdate(u, version);
     say("Installed " + u.version + ". The old version is saved in " + backup + ". Reloading\u2026");
@@ -74,7 +74,7 @@ export default function Settings({ clients, active, onLibraryChanged, openGuide,
       </div>
 
       <section className="block first">
-        <h3 className="block-title">Harsh Library</h3>
+        <h3 className="block-title">Frameshift Library</h3>
         <p className="help">One folder for everything the panel saves: every client&rsquo;s DNA, assets, SFX and comps, and each tool&rsquo;s data.</p>
         <div className="lib-card">
           <span className="lib-icon"><Folder size={18} /></span>
@@ -85,13 +85,13 @@ export default function Settings({ clients, active, onLibraryChanged, openGuide,
         </div>
         <div className="inline">
           <button className="ghost tight" disabled={!stats} onClick={() => lib("openFolder", { path: stats.dir }).catch(fail)}><Folder /> Open folder</button>
-          <button className="ghost tight" disabled={!!busy} onClick={() => { const d = pickFolder("Choose where the Harsh Library should live"); if (d) setPending(d); }}>Change location…</button>
+          <button className="ghost tight" disabled={!!busy} onClick={() => { const d = pickFolder("Choose where the Frameshift Library should live"); if (d) setPending(d); }}>Change location…</button>
         </div>
         {pending && (
           <div className="confirm-box">
             {looksLikeLibrary(pending) ? (
               <>
-                <p>That folder already has a Harsh Library. Use it? Your current library stays where it is.</p>
+                <p>That folder already has a Frameshift Library. Use it? Your current library stays where it is.</p>
                 <div className="inline">
                   <button className="ghost tight strong" onClick={() => move("use")}>Use this library</button>
                   <button className="ghost tight" onClick={() => setPending(null)}>Cancel</button>
@@ -115,7 +115,7 @@ export default function Settings({ clients, active, onLibraryChanged, openGuide,
 
       <section className="block">
         <h3 className="block-title">Updates</h3>
-        <p className="help">You have Harsh {version}. New versions download by themselves from the update source below, or you can drop a Harsh zip in the library&rsquo;s Updates folder.</p>
+        <p className="help">You have Frameshift {version}. New versions download by themselves from the update source below, or you can drop a Frameshift zip in the library&rsquo;s Updates folder.</p>
         <label className="field feed"><span>Update source</span>
           <input name="feed" autoComplete="off" spellCheck={false} value={feed} placeholder="GitHub repo, like harsh/harsh-panel\u2026"
             onChange={(e) => setFeed(e.target.value)} onBlur={() => setUpdateFeed(feed)} />
@@ -128,13 +128,13 @@ export default function Settings({ clients, active, onLibraryChanged, openGuide,
         </div>
         {found && (
           <div className="confirm-box">
-            <p>Harsh <b>{found.version}</b> is ready to install.</p>
+            <p>Frameshift <b>{found.version}</b> is ready to install.</p>
             <div className="inline"><button className="ghost tight strong" disabled={!!busy} onClick={() => install(found)}>Install {found.version}</button></div>
           </div>
         )}
         <div className="inline">
           <button className="ghost tight" disabled={!!busy} onClick={() => run("Looking for updates\u2026", async () => { setUpdateFeed(feed); await downloadUpdate(version); const u = await findUpdate(version); setFound(u); if (!u) say("You have the newest version."); })}>Check now</button>
-          <button className="ghost tight" disabled={!!busy} onClick={() => { const f = pickFiles("Choose a Harsh zip", "zip")[0]; if (f) run("Reading " + path.basename(f) + "\u2026", async () => {
+          <button className="ghost tight" disabled={!!busy} onClick={() => { const f = pickFiles("Choose a Frameshift zip", "zip")[0]; if (f) run("Reading " + path.basename(f) + "\u2026", async () => {
             const u = inspectUpdate(f);
             if (compareVersions(u.version, version) <= 0 && !older) { setOlder(u); return; }
             await install(u);
@@ -143,7 +143,7 @@ export default function Settings({ clients, active, onLibraryChanged, openGuide,
         </div>
         {older && (
           <div className="confirm-box">
-            <p>That zip is Harsh <b>{older.version}</b>, and you already have {version}. Install it anyway?</p>
+            <p>That zip is Frameshift <b>{older.version}</b>, and you already have {version}. Install it anyway?</p>
             <div className="inline">
               <button className="ghost tight strong" onClick={() => { const u = older; setOlder(null); run("Installing\u2026", () => install(u)); }}>Install {older.version}</button>
               <button className="ghost tight" onClick={() => setOlder(null)}>Cancel</button>
@@ -184,7 +184,7 @@ export default function Settings({ clients, active, onLibraryChanged, openGuide,
       </section>
 
       <section className="block about">
-        <span className="dim">Harsh v{version}</span>
+        <span className="dim">Frameshift v{version}</span>
         <button className="ghost tight" onClick={openGuide}><Book /> Open the guide</button>
       </section>
     </div>

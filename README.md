@@ -1,4 +1,4 @@
-# Harsh panel
+# Frameshift (formerly Harsh)
 
 Panel for Premiere Pro and After Effects: Text QC, Gap QC, Comp Vault, Sound Kit, Client DNA, Assets, and a shared Harsh Library.
 

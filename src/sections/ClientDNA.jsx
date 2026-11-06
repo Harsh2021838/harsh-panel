@@ -69,7 +69,7 @@ function View({ client, onEdit, onAssets }) {
   const say = (m) => { setErr(""); setNote(m); };
   const copy = (hex) => say(copyText(hex) ? "Copied " + hex + "." : "Couldn’t copy. The code is " + hex + ".");
   const apply = (hex) => lib("applyColor", { rgb: hexToRgb(hex) }).then((r) => say(hex + " applied to " + r.changed + (r.changed === 1 ? " layer" : " layers") + ". Cmd/Ctrl+Z undoes it.")).catch((e) => { setNote(""); setErr(e.message); });
-  const importLogo = () => lib("importFiles", { paths: [path.join(client.dir, client.logo)], bin: "Harsh / " + client.name }).then(() => say("Logo imported into the “Harsh / " + client.name + "” bin.")).catch((e) => setErr(e.message));
+  const importLogo = () => lib("importFiles", { paths: [path.join(client.dir, client.logo)], bin: "Frameshift / " + client.name }).then(() => say("Logo imported into the “Harsh / " + client.name + "” bin.")).catch((e) => setErr(e.message));
   const showFolder = () => lib("openFolder", { path: client.dir }).catch(() => { try { window.cep.util.openURLInDefaultBrowser(fileUrl(client.dir)); } catch (e) {} });
 
   return (

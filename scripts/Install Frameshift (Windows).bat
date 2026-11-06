@@ -1,12 +1,12 @@
 @echo off
-rem Harsh panel installer for Windows. Double-click it.
+rem Frameshift panel installer for Windows. Double-click it.
 rem Installs for this user only, so no admin rights are needed.
 setlocal
 set "SRC=%~dp0com.harsh.panel"
 set "DEST=%APPDATA%\Adobe\CEP\extensions\com.harsh.panel"
 
 echo.
-echo   Installing the Harsh panel for Premiere Pro and After Effects
+echo   Installing the Frameshift panel for Premiere Pro and After Effects
 echo.
 
 tasklist /FI "IMAGENAME eq Adobe Premiere Pro.exe" 2>nul | find /I "Adobe Premiere Pro.exe" >nul
@@ -33,7 +33,7 @@ xcopy "%SRC%" "%DEST%" /E /I /Y /Q >nul
 rem Allow unsigned panels in every Premiere version from 2022 on (CEP 9-12).
 for %%v in (9 10 11 12) do reg add "HKCU\Software\Adobe\CSXS.%%v" /v PlayerDebugMode /t REG_SZ /d 1 /f >nul
 
-echo   Done. Open Premiere Pro or After Effects, then Window ^> Extensions ^> Harsh.
+echo   Done. Open Premiere Pro or After Effects, then Window ^> Extensions ^> Frameshift.
 echo   To update later, run the new installer the same way.
 echo.
 pause

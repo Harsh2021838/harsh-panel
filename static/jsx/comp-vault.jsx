@@ -1,4 +1,4 @@
-// Harsh - Comp Vault, host side (After Effects + Premiere Pro). Global: $.HarshCompVault.
+// Frameshift - Comp Vault, host side (After Effects + Premiere Pro). Global: $.HarshCompVault.
 // ExtendScript is ES3: plain loops, no Array helpers, no JSON object. Keep this file ASCII.
 // The panel calls: $.HarshCompVault.call("name", {args}) and gets a JSON string back:
 //   {"ok":true,"data":...}  or  {"ok":false,"error":"message for the editor"}

@@ -162,7 +162,7 @@ export default function GapQC({ report = () => {} }) {
         const names = CHECKS.filter(([id]) => c.off.indexOf(id) !== -1).map((x) => x[1]);
         if (c.off.length) setChecks((cur) => { const n = { ...cur }; c.off.forEach((id) => { n[id] = false; }); return n; });
         setCrashNote("Premiere stopped last time " + c.where + (c.file ? " (" + pathMod.basename(c.file) + ")" : "") + ". " +
-          (names.length ? "Turned off: " + names.join(", ") + ". Everything else still works." : "Try the open sequence only, and tell Harsh\u2019s maker what you checked."));
+          (names.length ? "Turned off: " + names.join(", ") + ". Everything else still works." : "Try the open sequence only, and send a screenshot of this to whoever looks after Frameshift."));
       }
       logLine("handled");
     });
@@ -256,7 +256,7 @@ export default function GapQC({ report = () => {} }) {
   async function addMarkers() {
     setErr(""); setNote("");
     const by = {};
-    todo.forEach((g) => { (by[g.containerId] = by[g.containerId] || []).push({ time: g.time, name: "Harsh: " + what(g), comment: detail(g), color: MARKER_COLOR[g.kind] || 1 }); });
+    todo.forEach((g) => { (by[g.containerId] = by[g.containerId] || []).push({ time: g.time, name: "Frameshift: " + what(g), comment: detail(g), color: MARKER_COLOR[g.kind] || 1 }); });
     let n = 0;
     try { for (const id in by) n += (await call("prMarkers", { containerId: id, items: by[id] })).added; setNote("Added " + plural(n, "marker") + " to the timeline."); }
     catch (e) { setErr(e.message); }
@@ -274,7 +274,7 @@ export default function GapQC({ report = () => {} }) {
         const stamp = new Date().toISOString().slice(0, 16).replace(/[T:]/g, "-");
         const file = path.join(out, String(run.project).replace(/\.[^.]+$/, "").replace(/[\\/:*?"<>|]/g, "_") + " " + stamp + ".csv");
         fs.writeFileSync(file, "\ufeff" + rows.map((r) => r.map(cell).join(",")).join("\r\n"), "utf8");
-        setNote("Saved the report to Harsh Library \u203A Tools \u203A Gap QC \u203A Reports.");
+        setNote("Saved the report to Frameshift Library \u203A Tools \u203A Gap QC \u203A Reports.");
         lib("openFolder", { path: out }).catch(() => {});
       }).catch((e) => setErr(e.message));
     } catch (e) { setErr(e.message); }

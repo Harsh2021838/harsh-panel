@@ -1,4 +1,4 @@
-// Harsh - Gap QC, host side (After Effects + Premiere Pro).
+// Frameshift - Gap QC, host side (After Effects + Premiere Pro).
 // Finds short gaps (1 to N frames) that flash black or flash the layer below:
 //   Premiere: between clips on a track, at the start of a track, and a track ending just before the sequence ends.
 //   After Effects: moments where no layer is visible, a layer ending just before the comp ends,
@@ -313,7 +313,7 @@
     // (or pulling the next layer's start back to 0 at the comp start).
     api.aeFix = function (g) {
         var comp = compById(g.containerId);
-        app.beginUndoGroup("Harsh Gap QC fix");
+        app.beginUndoGroup("Frameshift Gap QC fix");
         try {
             if (g.layers && g.layers.length) {
                 var stuck = [];

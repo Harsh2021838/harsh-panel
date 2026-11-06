@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Harsh panel: editor guide</title>
+<title>Frameshift: editor guide</title>
 <style>
   :root { --blue: #1c83ff; --text: #1d1d1f; --muted: #5f6368; --line: #e3e5e8; --bg: #ffffff; --soft: #f4f7fb; --red: #c62828; }
   @media (prefers-color-scheme: dark) {
@@ -32,7 +32,7 @@
 </head>
 <body>
 <main>
-  <header><img class="mark" alt="" src="data:image/png;base64,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"><h1>Harsh panel</h1></header>
+  <header><img class="mark" alt="" src="data:image/png;base64,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"><h1>Harsh panel</h1></header>
   <p class="lead">For Premiere Pro and After Effects 2022 and later, on Windows and Mac.</p>
   <nav><a href="#install">Install</a><a href="#client-dna">Client DNA</a><a href="#assets">Assets</a><a href="#text-qc">Text QC</a><a href="#settings">Settings and your library</a><a href="#help">If something goes wrong</a><a href="#updates">Updates</a></nav>
 
@@ -43,7 +43,7 @@
       <h3>Windows</h3>
       <ol>
         <li>Quit Premiere Pro and After Effects.</li>
-        <li>Double-click <strong>Install Harsh (Windows).bat</strong>.</li>
+        <li>Double-click <strong>Install Frameshift (Windows).bat</strong>.</li>
         <li>If Windows says &ldquo;Windows protected your PC&rdquo;, click <strong>More info</strong>, then <strong>Run anyway</strong>.</li>
         <li>When it says Done, press any key.</li>
       </ol>
@@ -52,12 +52,12 @@
       <h3>Mac</h3>
       <ol>
         <li>Quit Premiere Pro and After Effects.</li>
-        <li><strong>Right-click</strong> <strong>Install Harsh (Mac).command</strong> and choose <strong>Open</strong>, then <strong>Open</strong> again. (macOS blocks double-clicking it the first time.)</li>
+        <li><strong>Right-click</strong> <strong>Install Frameshift (Mac).command</strong> and choose <strong>Open</strong>, then <strong>Open</strong> again. (macOS blocks double-clicking it the first time.)</li>
         <li>When it says Done, press Enter.</li>
       </ol>
     </div>
   </div>
-  <p>Then open Premiere Pro or After Effects and choose <strong>Window &gt; Extensions &gt; Harsh</strong>. Dock the panel wherever you like; the app remembers it.</p>
+  <p>Then open Premiere Pro or After Effects and choose <strong>Window &gt; Extensions &gt; Frameshift</strong>. Dock the panel wherever you like; the app remembers it.</p>
 
   <h2 id="client-dna">Client DNA</h2>
   <p>Each client&rsquo;s brand in one place: logo, website, brand colours, the highlight colours you use in videos, fonts, email, the founder&rsquo;s social links, links to channels or videos whose visual style to follow, and notes. Choose the client once with the button at the top right of the panel; Client DNA and Assets then show that client.</p>
@@ -70,7 +70,7 @@
     <li><strong>Click a colour</strong> to copy its code, ready to paste into Premiere or After Effects.</li>
     <li><strong>In After Effects</strong>, select text or shape layers and click a colour&rsquo;s brush to apply it. <kbd>Cmd/Ctrl+Z</kbd> undoes it.</li>
     <li>Fonts not installed on this computer are marked, so you know before you start.</li>
-    <li><strong>Import logo</strong> puts the logo in a &ldquo;Harsh / client name&rdquo; bin (Premiere) or folder (After Effects).</li>
+    <li><strong>Import logo</strong> puts the logo in a &ldquo;Frameshift / client name&rdquo; bin (Premiere) or folder (After Effects).</li>
   </ul>
 
   <h2 id="assets">Assets</h2>
@@ -81,7 +81,7 @@
     <li>In Premiere, a selected template (.mogrt) can go straight onto the timeline with <strong>At playhead</strong>.</li>
     <li><strong>Remove</strong> moves files to the library&rsquo;s _Removed folder; nothing is deleted.</li>
   </ul>
-  <div class="box">Everything is saved in your Harsh Library (see <a href="#settings">Settings</a>).</div>
+  <div class="box">Everything is saved in your Frameshift Library (see <a href="#settings">Settings</a>).</div>
 
   <h2 id="text-qc">Text QC</h2>
   <p>Finds typos and grammar mistakes in on-screen text before you export. Open the <strong>QC</strong> tab at the bottom of the panel, then <strong>Text QC</strong>.</p>
@@ -124,9 +124,9 @@
   <p>The free spelling server handles about 65,000 characters a minute and waits on its own if a job goes over. For no limit, run LanguageTool on your computer and enter its address (for example <code>http://localhost:8081</code>) in <strong>Settings &gt; Spelling server</strong>, or add a LanguageTool Premium username and API key.</p>
 
   <h2 id="settings">Settings and your library</h2>
-  <p>Everything the panel saves lives in one folder, the <strong>Harsh Library</strong>: every client&rsquo;s DNA, logo, assets, SFX and reusable comps, plus each tool&rsquo;s own data (like the Text QC dictionary and reports). Open <strong>Settings</strong> with the gear at the top right.</p>
+  <p>Everything the panel saves lives in one folder, the <strong>Frameshift Library</strong>: every client&rsquo;s DNA, logo, assets, SFX and reusable comps, plus each tool&rsquo;s own data (like the Text QC dictionary and reports). Open <strong>Settings</strong> with the gear at the top right.</p>
   <ul>
-    <li><strong>Change location</strong>: pick a folder. Choose <strong>Copy my library there</strong> to move everything (the old folder is left as it is), or point at a folder that already has a Harsh Library, for example on your team&rsquo;s Dropbox.</li>
+    <li><strong>Change location</strong>: pick a folder. Choose <strong>Copy my library there</strong> to move everything (the old folder is left as it is), or point at a folder that already has a Frameshift Library, for example on your team&rsquo;s Dropbox.</li>
     <li><strong>Save a backup</strong>: makes a dated copy of the whole library wherever you choose.</li>
     <li><strong>Export</strong> a client: one folder with everything for that client, to send to someone or move to another computer. <strong>Import a client folder</strong> brings it in.</li>
   </ul>
@@ -141,10 +141,10 @@
   </ul>
 
   <h2 id="updates">Updates</h2>
-  <p>New versions come as a Harsh zip (like <code>Harsh-2_5_0.zip</code>). Two ways to install one:</p>
+  <p>New versions come as a Frameshift zip (like <code>Frameshift-2_14_0.zip</code>). Two ways to install one:</p>
   <ul>
     <li><strong>Automatically:</strong> once an update source is set in <strong>Settings &gt; Updates</strong>, new versions download by themselves (when the panel opens and every few hours) into the Updates folder.</li>
-    <li><strong>Updates folder:</strong> put the zip in the <code>Updates</code> folder of your Harsh Library. The panel finds it when it opens. In <strong>Settings &gt; Updates</strong>, choose <strong>Ask me first</strong> (a yellow bar offers <strong>Install now</strong>) or <strong>Install automatically</strong>. If your library is on a shared drive, everyone on the team gets it.</li>
+    <li><strong>Updates folder:</strong> put the zip in the <code>Updates</code> folder of your Frameshift Library. The panel finds it when it opens. In <strong>Settings &gt; Updates</strong>, choose <strong>Ask me first</strong> (a yellow bar offers <strong>Install now</strong>) or <strong>Install automatically</strong>. If your library is on a shared drive, everyone on the team gets it.</li>
     <li><strong>By hand:</strong> <strong>Settings &gt; Updates &gt; Install from file</strong> and choose the zip.</li>
   </ul>
   <p>Before installing, the current version is copied to the library&rsquo;s <code>_Removed</code> folder, so you can always go back. The panel reloads by itself; if anything looks odd afterwards, restart Premiere or After Effects. Running the installer from the zip also still works.</p>

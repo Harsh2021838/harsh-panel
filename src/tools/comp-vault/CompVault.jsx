@@ -54,7 +54,7 @@ async function build() {
   const settingsFile = path.join(root, "settings.json");
   // The old plugin's default folder was the Harsh Library itself.
   const oldSettings = path.join(os.homedir(), ".harsh", "library.json");
-  let oldRoot = path.join(os.homedir(), "Documents", "Harsh Library");
+  let oldRoot = path.dirname(path.dirname(root)); // the Frameshift (formerly Harsh) Library itself
   try { const s = JSON.parse(fs.readFileSync(oldSettings, "utf8")); if (s.root) oldRoot = s.root; } catch (e) {}
   if (!fs.existsSync(path.join(root, ".moved")) && path.resolve(oldRoot) !== path.resolve(root)) {
     const moved = moveOldItems(fs, path, oldRoot, root);

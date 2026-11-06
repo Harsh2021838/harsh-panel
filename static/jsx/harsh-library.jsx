@@ -28,7 +28,7 @@
     // a.paths: files; a.bin: "Harsh / Brightline" style bin path (created if missing)
     api.importFiles = function (a) {
         if (!app.project) throw new Error("Open a project first.");
-        var names = String(a.bin || "Harsh").split(" / ");
+        var names = String(a.bin || "Frameshift").split(" / ");
         var done = 0, failed = [];
         if (isAE()) {
             var parent = app.project.rootFolder;
@@ -39,7 +39,7 @@
                 }
                 parent = found || lastFolder(names[n], parent);
             }
-            app.beginUndoGroup("Harsh import");
+            app.beginUndoGroup("Frameshift import");
             try {
                 for (var p = 0; p < a.paths.length; p++) {
                     try {
@@ -112,7 +112,7 @@
                 } else if (p.numProperties && p.numProperties > 0) fills(p);
             }
         }
-        app.beginUndoGroup("Harsh brand colour");
+        app.beginUndoGroup("Frameshift brand colour");
         try {
             for (var l = 0; l < layers.length; l++) {
                 var layer = layers[l];

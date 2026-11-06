@@ -21,7 +21,7 @@
   position: relative;
   display: flex;
   flex-direction: column;
-  min-height: calc(100vh - 66px); /* fills the Harsh panel between its title bar and footer */
+  min-height: calc(100vh - 66px); /* fills the Frameshift panel between its title bar and footer */
   color: var(--hl-ink);
 }
 :root[data-theme=light] .hl {

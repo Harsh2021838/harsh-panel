@@ -48,8 +48,8 @@ export default function Assets({ active, goDNA }) {
   const toggle = (a) => setSel((s) => (s.indexOf(a.path) === -1 ? s.concat([a.path]) : s.filter((x) => x !== a.path)));
   const mogrt = selected.length === 1 && /\.mogrt$/i.test(selected[0].name) && !isAE;
 
-  const importSel = () => lib("importFiles", { paths: selected.map((a) => a.path), bin: "Harsh / " + label })
-    .then((r) => say("Imported " + r.imported + (r.imported === 1 ? " file" : " files") + " into the “Harsh / " + label + "” " + (isAE ? "folder" : "bin") + "." + (r.failed && r.failed.length ? " Couldn’t import: " + r.failed.join(", ") : "")))
+  const importSel = () => lib("importFiles", { paths: selected.map((a) => a.path), bin: "Frameshift / " + label })
+    .then((r) => say("Imported " + r.imported + (r.imported === 1 ? " file" : " files") + " into the “Frameshift / " + label + "” " + (isAE ? "folder" : "bin") + "." + (r.failed && r.failed.length ? " Couldn’t import: " + r.failed.join(", ") : "")))
     .catch(fail);
   const place = () => lib("placeMogrt", { path: selected[0].path }).then((r) => say("Placed at the playhead on V" + r.track + ".")).catch(fail);
   const reveal = async () => lib("openFolder", { path: selected.length === 1 ? selected[0].path : await assetsDir(client) }).catch(fail);
@@ -105,7 +105,7 @@ export default function Assets({ active, goDNA }) {
             const on = sel.indexOf(a.path) !== -1;
             return (
               <li key={a.path}>
-                <button className={"card" + (on ? " on" : "")} aria-pressed={on} onClick={() => toggle(a)} onDoubleClick={() => { setSel([a.path]); lib("importFiles", { paths: [a.path], bin: "Harsh / " + label }).then(() => say("Imported " + a.name + ".")).catch(fail); }} title={a.name}>
+                <button className={"card" + (on ? " on" : "")} aria-pressed={on} onClick={() => toggle(a)} onDoubleClick={() => { setSel([a.path]); lib("importFiles", { paths: [a.path], bin: "Frameshift / " + label }).then(() => say("Imported " + a.name + ".")).catch(fail); }} title={a.name}>
                   <span className="thumb"><Thumb a={a} /></span>
                   <span className="card-name trunc">{a.name.replace(/\.[^.]+$/, "")}</span>
                   <span className="card-sub trunc">{a.group || ext(a.name)}</span>

@@ -2,12 +2,12 @@
 <ExtensionManifest
 Version="6.0"
 ExtensionBundleId="com.harsh.panel"
-ExtensionBundleVersion="2.13.2"
-ExtensionBundleName="Harsh"
+ExtensionBundleVersion="2.14.0"
+ExtensionBundleName="Frameshift"
 xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
 >
 <ExtensionList>
-  <Extension Id="com.harsh.panel.main" Version="2.13.2" />
+  <Extension Id="com.harsh.panel.main" Version="2.14.0" />
 </ExtensionList>
 <ExecutionEnvironment>
   <HostList>
@@ -37,7 +37,7 @@ xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
       </Lifecycle>
       <UI>
         <Type>Panel</Type>
-        <Menu>Harsh</Menu>
+        <Menu>Frameshift</Menu>
         <Geometry>
           <Size>
             <Width>380</Width>

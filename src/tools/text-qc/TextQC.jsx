@@ -128,7 +128,7 @@ export default function TextQC({ report = () => {} }) {
         if (lines.length && !/^(done|panel done|handled)/.test(lastLine)) {
           const at = /^read (.*)$/.exec(lastLine);
           setJumpNote(hostName + " stopped last time while Text QC was reading the project" + (at ? " (sequence " + at[1] + ")" : "") +
-            ". Try \u201COpen sequence\u201D instead of all sequences, and tell Harsh\u2019s maker this line: " + lastLine);
+            ". Try \u201COpen sequence\u201D instead of all sequences, and send this line to whoever looks after Frameshift: " + lastLine);
         }
         fs.appendFileSync(checkLog.current, "handled\n");
       } catch (e) {}

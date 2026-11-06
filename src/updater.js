@@ -1,4 +1,4 @@
-// Installs a newer Harsh from a zip (the same Harsh-x_y_z.zip the build makes),
+// Installs a newer Frameshift (formerly Harsh) from a zip (the Frameshift-x_y_z.zip the build makes),
 // either picked by hand or found in the library's Updates folder.
 //
 // Steps: read the zip -> find com.harsh.panel/ inside -> check its version -> copy the
@@ -57,7 +57,7 @@ function readZip(buf) {
 export function inspectUpdate(file) {
   const zip = readZip(fs.readFileSync(file));
   const man = zip.entries.find((e) => /(^|\/)com\.harsh\.panel\/CSXS\/manifest\.xml$/.test(e.name) && e.name.indexOf("__MACOSX") === -1);
-  if (!man) throw new Error(path.basename(file) + " isn’t a Harsh update (no com.harsh.panel folder inside).");
+  if (!man) throw new Error(path.basename(file) + " isn’t a Frameshift update (no com.harsh.panel folder inside).");
   const xml = zip.read(man).toString("utf8");
   const version = (/ExtensionBundleVersion="([^"]+)"/.exec(xml) || [])[1];
   if (!version) throw new Error("Couldn’t read the version inside " + path.basename(file) + ".");
@@ -94,7 +94,7 @@ export async function installUpdate(u, current) {
   try { fs.accessSync(ext, fs.constants.W_OK); }
   catch (e) { throw new Error("The panel is installed in a folder this account can’t change. Run the installer from the new zip instead."); }
   const removed = path.join(await libraryDir(), "_Removed");
-  const backup = path.join(removed, "Harsh " + current + " backup " + Date.now());
+  const backup = path.join(removed, "Frameshift " + current + " backup " + Date.now());
   copyDir(ext, backup);
   let written = 0;
   for (const e of u.zip.entries) {
@@ -127,7 +127,7 @@ function get(url, asBuffer, hops = 0) {
     const u = new URL(url);
     const req = (u.protocol === "http:" ? http : https).get({
       hostname: u.hostname, port: u.port || undefined, path: u.pathname + u.search,
-      headers: { "User-Agent": "Harsh-panel-updater", Accept: asBuffer ? "application/octet-stream" : "application/json" },
+      headers: { "User-Agent": "Frameshift-panel-updater", Accept: asBuffer ? "application/octet-stream" : "application/json" },
     }, (res) => {
       if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location && hops < 6) {
         res.resume();
@@ -148,7 +148,7 @@ export async function latestOnline(feed = updateFeed()) {
   if (!feed) return null;
   if (/^[\w.-]+\/[\w.-]+$/.test(feed)) {
     const rel = JSON.parse(await get("https://api.github.com/repos/" + feed + "/releases/latest"));
-    const asset = (rel.assets || []).find((a) => /^Harsh-.*\.zip$/i.test(a.name));
+    const asset = (rel.assets || []).find((a) => /^Frameshift-.*\.zip$/i.test(a.name)) || (rel.assets || []).find((a) => /^Harsh-.*\.zip$/i.test(a.name));
     if (!asset) return null;
     return { version: String(rel.tag_name || "").replace(/^v/i, ""), url: asset.browser_download_url };
   }
@@ -165,7 +165,7 @@ export async function downloadUpdate(current) {
   if (!info || compareVersions(info.version, current) <= 0) return null;
   const dir = await updatesDir();
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-  const file = path.join(dir, "Harsh-" + info.version.replace(/\./g, "_") + ".zip");
+  const file = path.join(dir, "Frameshift-" + info.version.replace(/\./g, "_") + ".zip");
   if (!fs.existsSync(file)) {
     const data = await get(info.url, true);
     fs.writeFileSync(file + ".part", data);

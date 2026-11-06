@@ -1,6 +1,6 @@
 # Publishes a GitHub release for each new version.
 # On every push to main: if package.json's version has no release yet, build the panel
-# and publish release v<version> with Harsh-*.zip attached. The panel's updater reads
+# and publish release v<version> with Frameshift-*.zip (and Harsh-*.zip for panels from before the rename) attached. The panel's updater reads
 # the newest release here and downloads that zip.
 name: Release
 
@@ -53,6 +53,6 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           V=${{ steps.v.outputs.version }}
-          gh release create "v$V" dist/Harsh-*.zip --target "$GITHUB_SHA" \
-            --title "Harsh $V" \
+          gh release create "v$V" dist/Frameshift-*.zip dist/Harsh-*.zip --target "$GITHUB_SHA" \
+            --title "Frameshift $V" \
             --notes "Install: unzip and run the installer, or let the panel update itself (Settings > Updates)."
