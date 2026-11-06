@@ -190,6 +190,15 @@ var CSK = (function () {
         return { track: tracks[trackIndex], index: trackIndex };
     }
 
+    // Colour a timeline clip and report what Premiere then shows: "got:<index>" or "nolabel" when
+    // this Premiere has no colour functions for timeline clips (the project item is coloured anyway).
+    function labelClip(clip, colorIndex) {
+        var has = false;
+        try { if (clip.setColorLabel) { clip.setColorLabel(colorIndex); has = true; } } catch (e1) {}
+        try { if (clip.getColorLabel) return "got:" + clip.getColorLabel(); } catch (e2) {}
+        return has ? "set" : "nolabel";
+    }
+
     // Places [inSec, outSec) of a file at the playhead. outSec <= 0 means to the end.
     function placeCore(path, clientName, trackIndex, inSec, outSec, colorIndex) {
         var seq = app.project.activeSequence;
@@ -213,13 +222,14 @@ var CSK = (function () {
         var clip = findClipAt(picked.track, start, item);
         if (trim) { try { item.clearInPoint(); item.clearOutPoint(); } catch (e3) {} }
 
+        var colour = "";
         if (clip) {
-            if (colorIndex >= 0) { try { if (clip.setColorLabel) clip.setColorLabel(colorIndex); } catch (e4) {} }
+            if (colorIndex >= 0) colour = labelClip(clip, colorIndex);
             if (trim && clip.end.seconds - clip.start.seconds > dur + 0.01) {
                 var t = new Time(); t.seconds = start + dur; clip.end = t;
             }
         }
-        return { clip: clip, index: picked.index, dur: dur };
+        return { clip: clip, index: picked.index, dur: dur, colour: colour };
     }
 
     function rangeOf(seq) {
@@ -260,7 +270,7 @@ var CSK = (function () {
             try {
                 var res = placeCore(path, clientName, trackIndex, 0, outSec, colorIndex);
                 var ok = res.clip ? setStaticVolume(res.clip, db) : false;
-                return "OK|A" + (res.index + 1) + "|" + (ok ? "1" : "0") + "|" + r(res.dur, 3);
+                return "OK|A" + (res.index + 1) + "|" + (ok ? "1" : "0") + "|" + r(res.dur, 3) + "|" + res.colour;
             } catch (e) { return "ERR|" + e.message; }
         },
 
@@ -270,7 +280,7 @@ var CSK = (function () {
                 var res = placeCore(path, clientName, trackIndex, inSec, outSec, colorIndex);
                 var keys = parseKeys(keysStr), ok = false;
                 if (res.clip) ok = keys.length ? applyKeys(res.clip, keys, mode) : setStaticVolume(res.clip, staticDb);
-                return "OK|A" + (res.index + 1) + "|" + (ok ? "1" : "0") + "|" + r(res.dur, 3);
+                return "OK|A" + (res.index + 1) + "|" + (ok ? "1" : "0") + "|" + r(res.dur, 3) + "|" + res.colour;
             } catch (e) { return "ERR|" + e.message; }
         },
 
@@ -358,7 +368,7 @@ var CSK = (function () {
         // Returns "OK|<clips found>"; the panel calls again until the clip has landed.
         afterDrop: function (path, colorIndex, keysStr, mode) {
             try {
-                var target = norm(path), n = 0, i, j, keys = parseKeys(keysStr || "");
+                var target = norm(path), n = 0, i, j, keys = parseKeys(keysStr || ""), colour = "";
                 var item = findItemByPath(app.project.rootItem, target);
                 if (item && colorIndex >= 0) { try { item.setColorLabel(colorIndex); } catch (e1) {} }
                 var seq = app.project.activeSequence;
@@ -371,7 +381,7 @@ var CSK = (function () {
                             try {
                                 if (!c.projectItem || norm(c.projectItem.getMediaPath()) !== target) continue;
                                 n++;
-                                if (colorIndex >= 0 && c.setColorLabel) { try { c.setColorLabel(colorIndex); } catch (e3) {} }
+                                if (colorIndex >= 0) colour = labelClip(c, colorIndex);
                                 if (keys.length) {
                                     var level = getLevelParam(c), varying = false;
                                     try { varying = level && level.isTimeVarying(); } catch (e4) {}
@@ -381,7 +391,7 @@ var CSK = (function () {
                         }
                     }
                 }
-                return "OK|" + n;
+                return "OK|" + n + "|" + colour;
             } catch (e) { return "ERR|" + e.message; }
         },
 

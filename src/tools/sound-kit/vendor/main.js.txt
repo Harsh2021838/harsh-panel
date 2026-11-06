@@ -384,6 +384,10 @@
         partVolumeHtml(d);
     }
     var vol = d.kind !== 'part' ? '<div class="erow"><label>Volume</label>' + faderHtml(d.db) + '</div>' : '';
+    if (d.kind === 'bgm') vol += '<div class="erow"><label>Fade in and out</label><div class="inout">' +
+      '<span>In</span><input type="number" step="0.5" min="0" data-f="fadeIn" value="' + (d.fadeIn == null ? 1 : d.fadeIn) + '">' +
+      '<span>s</span><span>Out</span><input type="number" step="0.5" min="0" data-f="fadeOut" value="' + (d.fadeOut == null ? 2 : d.fadeOut) + '"><span>s</span></div>' +
+      '<div class="note">Added as volume keyframes when you place or drag it. 0 = no fade.</div></div>';
     var beats = d.kind === 'sfx'
       ? '<div class="erow"><label>Beat detection</label>' +
           '<div class="sens"><span>Fewer</span><input type="range" data-f="sens" min="0" max="1" step="0.05" value="' +
@@ -648,7 +652,10 @@
     } else if (range) {
       what = a.name + ' (' + fmtClock(range.a) + '–' + fmtClock(range.b) + ')';
       script = 'CSK.placePart(' + q(a.path) + ',' + q(client().name) + ',' + Number(a.track) + ',' +
-        range.a + ',' + range.b + ',"","media",' + clipDb(a) + ',' + Number(a.color) + ')';
+        range.a + ',' + range.b + ',' + q(bgmFadeKeys(a, range.b - range.a)) + ',"media",' + clipDb(a) + ',' + Number(a.color) + ')';
+    } else if (a.kind === 'bgm' && a.wave && a.wave.fileDur && bgmFadeKeys(a, a.wave.fileDur)) {
+      script = 'CSK.placePart(' + q(a.path) + ',' + q(client().name) + ',' + Number(a.track) + ',0,0,' +
+        q(bgmFadeKeys(a, a.wave.fileDur)) + ',"media",' + clipDb(a) + ',' + Number(a.color) + ')';
     } else {
       var out = a.kind === 'sfx' ? outForBeats(a, beats) : 0;
       var total = a.wave && a.wave.onsets ? a.wave.onsets.length : 0;
@@ -662,7 +669,7 @@
       var p = r.split('|');
       if (p[0] === 'OK') {
         var volOk = p[2] === '1';
-        setStatus('Placed ' + what + ' on ' + p[1] + ' at ' + volLabel(a) +
+        setStatus('Placed ' + what + ' on ' + p[1] + ' at ' + volLabel(a) + colourNote(r) +
           (volOk ? '' : '. Volume wasn’t applied, check Effect Controls.'), volOk ? 'ok' : 'err');
       } else setStatus(p.slice(1).join('|') || 'Premiere didn’t respond.', 'err');
     }).then(function () { placing = false; if (btn) btn.disabled = false; });
@@ -925,12 +932,15 @@
     else if (bgmSel[a.id]) { from = bgmSel[a.id].a; to = bgmSel[a.id].b; label = clockTag(from) + '-' + clockTag(to); }
     // Frameshift: a BGM part with keyframes is dragged as clean audio (0 dB); after the drop the
     // keyframes are put on the clip itself (afterDrop), so they show and can be moved in Premiere.
-    var flat = a.kind === 'part' && a.keys.length > 0;
+    var len = to > from ? to - from : (a.wave && a.wave.fileDur ? a.wave.fileDur - from : 0);
+    var fadeKeys = a.kind === 'bgm' ? bgmFadeKeys(a, len) : '';
+    var flat = (a.kind === 'part' && a.keys.length > 0) || !!fadeKeys;
     var vol = flat ? 'flat' : String(a.db);
     var key = [a.path, a.kind, from.toFixed(3), to.toFixed(3), vol, a.bakedDb || 0].join('|');
     if (a.kind === 'part') label = (label ? label + ' ' : '') + hashStr(key);
     var file = nodePath.join(renderDir(), safeName(a.name) + ' [' + (flat ? 'keys' : volTag(a)) + ']' + (label ? ' ' + label : '') + '.wav');
-    return { key: key, from: from, to: to, label: a.kind === 'part' ? '' : label, file: file, flat: flat };
+    var keysStr = a.kind === 'part' && flat ? a.keys.map(function (k) { return Number(k[0]) + ':' + Number(k[1]); }).join(';') : fadeKeys;
+    return { key: key + '|' + keysStr, from: from, to: to, label: a.kind === 'part' ? '' : label, file: file, flat: flat, keys: keysStr };
   }
   function prepareDrag(a) {
     if (!nodeFs || !a.wave || a.wave.error || !fileExists(a.path)) return Promise.resolve(null);
@@ -966,7 +976,7 @@
     }
     e.dataTransfer.effectAllowed = 'copy';
     e.dataTransfer.setData('com.adobe.cep.dnd.file.0', file);
-    internalDrag = { file: file, a: a, label: sp.label, flat: sp.flat };
+    internalDrag = { file: file, a: a, label: sp.label, flat: sp.flat, keys: sp.keys };
     setStatus(sp.flat ? 'Drop it on the timeline. Its volume keyframes are added to the clip once it lands.' : 'Drop it on the timeline. The volume is already in the file.');
   });
   list.addEventListener('dragend', function () {
@@ -974,14 +984,14 @@
     if (!d) return;
     // Frameshift: Premiere may still be importing and placing the clip when the drag ends, so
     // look for it every half second for up to 10 seconds, then colour it (and add keyframes).
-    var keys = d.flat ? d.a.keys.map(function (k) { return Number(k[0]) + ':' + Number(k[1]); }).join(';') : '';
+    var keys = d.flat ? d.keys : '';
     var tries = 0;
     (function look() {
       tries++;
       host('CSK.afterDrop(' + q(d.file) + ',' + Number(d.a.color) + ',' + q(keys) + ',' + q(d.a.mode || 'media') + ')').then(function (r) {
         if (r.indexOf('OK|') === 0 && Number(r.split('|')[1]) > 0) {
           setStatus('Dropped ' + d.a.name + (d.label ? ' (' + d.label + ')' : '') + ', coloured ' + LABELS[d.a.color].name +
-            (keys ? ', with its ' + d.a.keys.length + ' volume keyframes' : ' at ' + volLabel(d.a)) + '.', 'ok');
+            (keys ? ', with its ' + keys.split(';').length + ' volume keyframes' : ' at ' + volLabel(d.a)) + colourNote(r) + '.', 'ok');
         } else if (tries < 20) setTimeout(look, 500);
         else if (r.indexOf('ERR|') === 0) setStatus('Dropped, but couldn\u2019t colour it: ' + r.slice(4), 'err');
       });
@@ -1232,6 +1242,7 @@
     if (f === 'name') d.name = el.value;
     else if (f === 'db') { var v = parseFloat(el.value); if (!isNaN(v)) setDraftDb(card, v); return; }
     else if (f === 'track') d.track = parseInt(el.value, 10);
+    else if (f === 'fadeIn' || f === 'fadeOut') { var fv = parseFloat(el.value); d[f] = isNaN(fv) ? 0 : Math.max(0, fv); }
     else if (f === 'sens') { if (d.wave) { d.wave.sens = parseFloat(el.value); redetect(); } }
     else if (f === 'kt' || f === 'kd') {
       var i = Number(el.closest('.krow').dataset.i), n = parseFloat(el.value);
@@ -1795,7 +1806,27 @@
   function mkdirp(d) { if (!nodeFs.existsSync(d)) nodeFs.mkdirSync(d, { recursive: true }); }
 
   // Gain already in the source file (for sounds imported from a shared folder).
+  // What Premiere says about the clip's colour after placing (the jsx returns it as the last field).
+  function colourNote(r) {
+    var p = String(r || '').split('|'), c = p[p.length - 1];
+    if (c === 'nolabel') return ' (this Premiere can\u2019t colour timeline clips from a script)';
+    if (/^got:\d+$/.test(c)) return ' (Premiere shows it as ' + (LABELS[Number(c.slice(4))] || { name: '#' + c.slice(4) }).name + ')';
+    return '';
+  }
   function clipDb(a) { return Number(a.db) - (a.bakedDb || 0); }
+  // Frameshift: Full BGM fades in and out (seconds; default 1 s in, 2 s out). Returns the volume
+  // keyframes for a clip `len` seconds long as "t:db;t:db", or '' for no fades.
+  function bgmFadeKeys(a, len) {
+    if (a.kind !== 'bgm' || !(len > 0)) return '';
+    var fi = a.fadeIn == null ? 1 : Math.max(0, Number(a.fadeIn) || 0), fo = a.fadeOut == null ? 2 : Math.max(0, Number(a.fadeOut) || 0);
+    if (!fi && !fo) return '';
+    if (fi + fo > len) { var k = len / (fi + fo); fi *= k; fo *= k; }
+    var db = clipDb(a), keys = [];
+    if (fi) keys.push([0, MIN_DB], [fi, db]); else keys.push([0, db]);
+    if (fo) keys.push([len - fo, db], [len, MIN_DB]); else keys.push([len, db]);
+    keys = keys.filter(function (x, i) { return !i || Math.abs(x[0] - keys[i - 1][0]) > 0.0005; }); // short clip: fades meet
+    return keys.map(function (x) { return (Math.round(x[0] * 1000) / 1000) + ':' + x[1]; }).join(';');
+  }
 
   function encodeWav(chs, sr, useFloat) {
     var nCh = chs.length, n = chs[0].length, bps = useFloat ? 4 : 3, block = nCh * bps, dataLen = n * block;
@@ -2196,11 +2227,37 @@
         paths.push(pth);
       });
     }
-    if (paths.length) addFiles(paths);
-    else setStatus('Couldn’t read dropped files here. Use Add sounds instead.', 'err');
+    if (paths.length) { addFiles(paths); return; }
+    // Frameshift: Premiere's panel browser gave no file locations, but it does give the files'
+    // contents. Save a copy in the library (Sound Kit/Dropped/<client>) and add that.
+    var files = [].slice.call(e.dataTransfer.files || []).filter(function (f) { return AUDIO_EXT.test(f.name); });
+    if (!files.length) { setStatus('No audio files in that drop. Supported: wav, mp3, aif, m4a, aac, flac, ogg.', 'err'); return; }
+    setStatus('Copying ' + files.length + ' dropped file' + (files.length > 1 ? 's' : '') + ' into the library\u2026');
+    var dir = nodePath.join(LIB_DIR, 'Dropped', safeName(client().name));
+    mkdirp(dir);
+    Promise.all(files.map(function (f) {
+      return new Promise(function (resolve) {
+        var rd = new FileReader();
+        rd.onload = function () {
+          try {
+            var B = window.require('buffer').Buffer, data = B.from(rd.result), out = nodePath.join(dir, f.name), n = 2;
+            // same name already there with different content: keep both
+            while (nodeFs.existsSync(out) && nodeFs.statSync(out).size !== data.length) out = nodePath.join(dir, f.name.replace(/(\.[^.]+)$/, ' ' + (n++) + '$1'));
+            if (!nodeFs.existsSync(out)) nodeFs.writeFileSync(out, data);
+            resolve(out);
+          } catch (err) { resolve(null); }
+        };
+        rd.onerror = function () { resolve(null); };
+        rd.readAsArrayBuffer(f);
+      });
+    })).then(function (copied) {
+      copied = copied.filter(Boolean);
+      if (copied.length) addFiles(copied);
+      else setStatus('Couldn\u2019t read the dropped files. Use Add sounds instead.', 'err');
+    });
   });
 
-  window.__cskTest = { duplicateOf: duplicateOf, encodeWav: encodeWav, renderRange: renderRange, decode: decode, dragSpec: dragSpec, prepareDrag: prepareDrag,
+  window.__cskTest = { bgmFadeKeys: bgmFadeKeys, duplicateOf: duplicateOf, encodeWav: encodeWav, renderRange: renderRange, decode: decode, dragSpec: dragSpec, prepareDrag: prepareDrag,
     bandProfile: bandProfile, measure: measure, importFromDir: importFromDir, runSyncAll: runSyncAll,
     lib: function () { return lib; }, check: function () { return check; }, bgmSel: function () { return bgmSel; } };
 
