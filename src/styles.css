@@ -569,3 +569,4 @@ input[type="checkbox"] { accent-color: var(--mark); margin: 0; width: 13px; heig
 .gap-keys { gap: 4px 12px; }
 .gap-keys > span { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
 .gap-keys svg { margin-left: 0; }
+.show-more { width: 100%; margin-top: 8px; }

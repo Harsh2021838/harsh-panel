@@ -6,6 +6,7 @@ import { makeHost, hostApp, nodeRequire } from "../../host.js";
 import { toolDir, lib } from "../../library.js";
 import { Target, Check, Ban, Join } from "../../icons.jsx";
 import { timecode } from "../text-qc/premiere-sources.js";
+import { analyze } from "./analyze.js";
 
 const call = makeHost("gap-qc.jsx", "HarshGapQC");
 
@@ -139,6 +140,7 @@ export default function GapQC({ report = () => {} }) {
   const [sel, setSel] = useState(null); // key of the selected row
   const [editSetup, setEditSetup] = useState(false);
   const [crashNote, setCrashNote] = useState("");
+  const [shown, setShown] = useState(100); // rows drawn; more on request, so long lists stay quick
   useEffect(() => {
     if (isAE) return;
     logPath().then((f) => {
@@ -188,11 +190,17 @@ export default function GapQC({ report = () => {} }) {
   useEffect(() => { report(phase === "checking" ? { running: true } : run ? { count: todo.length, at: run.at } : null); }, [phase, run, todo.length]);
 
   async function check() {
-    setErr(""); setNote(""); setOpen({}); setPhase("checking"); setEditSetup(false);
+    setErr(""); setNote(""); setOpen({}); setPhase("checking"); setEditSetup(false); setShown(100);
     const t0 = performance.now();
     try {
       if (!isAE) { await logPath(); logLine("check " + new Date().toISOString() + " " + JSON.stringify(checks), true); }
-      const r = await call(isAE ? "aeScan" : "prScan", { scope, maxFrames, audio, checks: isAE ? { gaps: true } : checks, logPath: isAE ? "" : logFile });
+      let r;
+      if (isAE) r = await call("aeScan", { scope, maxFrames, checks: { gaps: true } });
+      else {
+        // Premiere reads the timeline once; the checking happens here in the panel.
+        const dump = await call("prDump", { scope, audio, checks, logPath: logFile });
+        r = { project: dump.project, containers: dump.seqs.length, gaps: analyze(dump, { checks, maxFrames, audio }) };
+      }
       if (!isAE) logLine("panel done");
       r.gaps.forEach((g) => { g.tc = timecode(g.time, g.fps); if (g.againAt !== undefined) g.againTc = timecode(g.againAt, g.fps); });
       // Black flashes first, then by place in the edit.
@@ -269,7 +277,8 @@ export default function GapQC({ report = () => {} }) {
       if (!a) { q.busy = false; return; }
       q.busy = true;
       if (!isAE) logLine("jump " + a.startTicks);
-      call(isAE ? "aeJump" : "prJump", a).then(() => { if (!isAE) logLine("jumped"); }, (e) => { if (!isAE) logLine("jumped"); setErr(e.message); }).then(() => setTimeout(runNext, 60));
+      const timeout = new Promise((res) => setTimeout(res, 8000)); // never let one slow call block the rest
+      Promise.race([call(isAE ? "aeJump" : "prJump", a), timeout]).then(() => { if (!isAE) logLine("jumped"); }, (e) => { if (!isAE) logLine("jumped"); setErr(e.message); }).then(() => setTimeout(runNext, 60));
     };
     runNext();
   }
@@ -391,7 +400,7 @@ export default function GapQC({ report = () => {} }) {
       )}
       {run && todo.length > 0 && (
         <ol className="rows gap-list" ref={listRef}>
-          {todo.map((g) => {
+          {todo.slice(0, shown).map((g) => {
             const on = current === g;
             return (
               <li key={g.key} className={"gap-row" + (on ? " sel" : "")}>
@@ -420,6 +429,9 @@ export default function GapQC({ report = () => {} }) {
             );
           })}
         </ol>
+      )}
+      {run && todo.length > shown && (
+        <button className="ghost show-more" onClick={() => setShown(shown + 200)}>Show {Math.min(200, todo.length - shown)} more of {todo.length}</button>
       )}
 
       {handled.length > 0 && (
