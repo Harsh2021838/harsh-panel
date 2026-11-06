@@ -2,7 +2,7 @@
 // Premiere also cuts that don't line up across tracks, audio out of sync, and black or offline clips.
 // Host side: jsx/gap-qc.jsx. Each gap is drawn as a tiny timeline so it reads at a glance.
 import React, { useEffect, useRef, useState } from "react";
-import { makeHost, hostApp, nodeRequire, appSession } from "../../host.js";
+import { makeHost, hostApp, nodeRequire, appSession, premiereGoTo } from "../../host.js";
 import { toolDir, lib } from "../../library.js";
 import { Target, Check, Ban, Join } from "../../icons.jsx";
 import { timecode } from "../text-qc/premiere-sources.js";
@@ -243,9 +243,9 @@ export default function GapQC({ report = () => {} }) {
   }
   // Select a row (and go to it). After a row is handled it leaves the list, and the row that
   // takes its place is selected, so the next one is right under the mouse.
-  function pick(g, go = autoGo) {
+  function pick(g, go = autoGo, explicit = false) {
     setSel(g ? g.key : null);
-    if (g && go) jump(g);
+    if (g && go) jump(g, explicit);
   }
   function next(g) {
     const idx = todo.indexOf(g);
@@ -282,10 +282,11 @@ export default function GapQC({ report = () => {} }) {
   // One jump at a time, and only the latest one: several calls into Premiere at once
   // (clicking fast, or auto go to right after a fix) can make it fall over.
   const jumping = useRef({ busy: false, next: null });
-  function jump(g) {
+  // explicit: a click or Enter (may open another sequence). Automatic jumps stay in the open one.
+  function jump(g, explicit = false) {
     setErr("");
     const arg = isAE ? { containerId: g.containerId, time: g.time, prevIndex: g.prevIndex, nextIndex: g.nextIndex, layers: g.layers }
-      : { containerId: g.containerId, startTicks: g.startTicks };
+      : { containerId: g.containerId, startTicks: g.startTicks, explicit };
     const q = jumping.current;
     q.next = arg;
     if (q.busy) return;
@@ -295,7 +296,12 @@ export default function GapQC({ report = () => {} }) {
       q.busy = true;
       if (!isAE) logLine("jump " + a.startTicks);
       const timeout = new Promise((res) => setTimeout(res, 8000)); // never let one slow call block the rest
-      Promise.race([call(isAE ? "aeJump" : "prJump", a), timeout]).then(() => { if (!isAE) logLine("jumped"); }, (e) => { if (!isAE) logLine("jumped"); setErr(e.message); }).then(() => setTimeout(runNext, 60));
+      const go = isAE ? call("aeJump", a) : premiereGoTo(call, a.containerId, a.startTicks, a.explicit);
+      Promise.race([go, timeout]).then((r) => {
+        if (!isAE) logLine("jumped");
+        if (r && r.other) setNote("That one is in \u201C" + r.other + "\u201D. Click it to open that sequence.");
+        if (r && r.waiting) setNote("Opened the sequence. Click the row again to move the playhead.");
+      }, (e) => { if (!isAE) logLine("jumped"); setErr(e.message); }).then(() => setTimeout(runNext, 60));
     };
     runNext();
   }
@@ -327,7 +333,7 @@ export default function GapQC({ report = () => {} }) {
         const n = todo[Math.max(0, Math.min(todo.length - 1, i + (e.key === "ArrowDown" ? 1 : -1)))];
         if (n) pick(n);
       } else if (!current) return;
-      else if (e.key === "Enter") jump(current);
+      else if (e.key === "Enter") jump(current, true);
       else if (k === "c") done(current, "corrected");
       else if (k === "i") done(current, "ignored");
       else if (k === "f" && isGap(current)) fix(current);
@@ -421,7 +427,7 @@ export default function GapQC({ report = () => {} }) {
             const on = current === g;
             return (
               <li key={g.key} className={"gap-row" + (on ? " sel" : "")}>
-                <button className="gap-pick" aria-current={on ? "true" : undefined} onClick={() => pick(g, true)} title="Go to it">
+                <button className="gap-pick" aria-current={on ? "true" : undefined} onClick={() => pick(g, true, true)} title="Go to it">
                   <GapPicture g={g} />
                   <span className="row-main">
                     <span className="row-word">

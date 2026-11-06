@@ -111,6 +111,23 @@ export function makeHost(file, globalName) {
   };
 }
 
+/**
+ * Premiere: go to a time in a sequence, safely. `call` is a tool's makeHost caller whose jsx has
+ * prJump. If the sequence isn't the open one: an automatic jump (explicit false) does nothing and
+ * returns { other: name }; a Go to click opens it, waits until Premiere says it's open, and only
+ * then moves the playhead (both in one script call can crash Premiere).
+ */
+export async function premiereGoTo(call, containerId, startTicks, explicit) {
+  let r = await call("prJump", { containerId, startTicks, open: !!explicit });
+  if (!r || !r.opened) return r || {};
+  for (let i = 0; i < 12; i++) {
+    await new Promise((res) => setTimeout(res, 350));
+    r = await call("prJump", { containerId, startTicks, open: false });
+    if (r && r.moved) return r;
+  }
+  return { opened: true, waiting: true };
+}
+
 /** Text QC's commands. */
 export const host = makeHost("text-qc.jsx", "HarshTextQC");
 

@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import { host, hostApp, hostName, pickFiles, pickFolder, appSession } from "../../host.js";
+import { host, hostApp, hostName, pickFiles, pickFolder, appSession, premiereGoTo } from "../../host.js";
 import { Gear, Close, Back, Forward, Target } from "../../icons.jsx";
 import { expandPremiere } from "./premiere-sources.js";
 import {
@@ -148,6 +148,15 @@ export default function TextQC({ report = () => {} }) {
     addFiles(found);
   }
 
+  // Reading the project waits for the app's script engine, which answers nothing while a dialog is
+  // open (after a crash Premiere often shows "Link Media" or a recovered-project box). Say so after
+  // 15 seconds, and stop waiting after 3 minutes instead of loading forever.
+  function waitForApp(promise) {
+    const hint = setTimeout(() => setProg((p) => ({ ...(p || { done: 0, total: 0 }), label: "Still waiting for " + hostName + ". If a box is open there (Link Media, a recovered project, Save), close it." })), 15000);
+    const limit = new Promise((_, rej) => setTimeout(() => rej(new Error(hostName + " didn\u2019t answer for 3 minutes. Close any open box in " + hostName + " (Link Media, a recovered project), then press Check again.")), 180000));
+    return Promise.race([promise, limit]).finally(() => clearTimeout(hint));
+  }
+
   async function start() {
     setErr(""); setNote(""); setRun(null); setGroups([]); setMarks({}); setOpen({}); setLimit(80); setReview(null);
     token.current = { cancelled: false };
@@ -173,10 +182,10 @@ export default function TextQC({ report = () => {} }) {
           arg.folderIds = folders.filter((f) => f.checked).map((f) => f.id);
           if (!arg.folderIds.length) throw new Error("Tick at least one folder.");
         }
-        const r = await host("aeCollect", arg);
+        const r = await waitForApp(host("aeCollect", arg));
         items = r.items; project = r.project;
       } else {
-        const r = await host("prCollect", { mode: scope === "active" ? "active" : "all", deep: !!settings.deep });
+        const r = await waitForApp(host("prCollect", { mode: scope === "active" ? "active" : "all", deep: !!settings.deep }));
         setProg({ done: 0, total: 0, label: "Reading After Effects comps and captions\u2026" });
         await sleep(20);
         const x = expandPremiere(r, capFiles);
@@ -223,21 +232,29 @@ export default function TextQC({ report = () => {} }) {
 
   // One jump at a time, latest wins, so fast clicking or auto go to never stacks calls in the app.
   const jumping = useRef({ busy: false, next: null });
-  const jump = (it) => {
-    setErr("");
+  // explicit: a Go to click (may open another sequence). Automatic jumps stay in the open one.
+  const [where, setWhere] = useState("");
+  const jump = (it, explicit = false) => {
+    setErr(""); setWhere("");
     const q = jumping.current;
-    q.next = it;
+    q.next = { it, explicit };
     if (q.busy) return;
     const runNext = () => {
-      const a = q.next; q.next = null;
-      if (!a) { q.busy = false; return; }
+      const nx = q.next; q.next = null;
+      if (!nx) { q.busy = false; return; }
+      const a = nx.it;
       q.busy = true;
       // Send only what a jump needs (never the on-screen text), and never let one slow call block the rest.
       const arg = isAE ? { containerId: a.containerId, layerIndex: a.layerIndex, keyIndex: a.keyIndex, projectPath: a.projectPath }
         : { containerId: a.containerId, startTicks: a.startTicks };
       logJump("jump " + JSON.stringify(arg));
-      Promise.race([host(isAE ? "aeJump" : "prJump", arg), new Promise((res) => setTimeout(res, 8000))])
-        .then(() => logJump("ok"), (e) => { logJump("ok"); fail(e); }).then(() => setTimeout(runNext, 60));
+      const go = isAE ? host("aeJump", arg) : premiereGoTo(host, arg.containerId, arg.startTicks, nx.explicit);
+      Promise.race([go, new Promise((res) => setTimeout(res, 8000))])
+        .then((r) => {
+          logJump("ok");
+          if (r && r.other) setWhere("This one is in \u201C" + r.other + "\u201D. Press Go to to open that sequence.");
+          if (r && r.waiting) setWhere("Opened the sequence. Press Go to again to move the playhead.");
+        }, (e) => { logJump("ok"); fail(e); }).then(() => setTimeout(runNext, 60));
     };
     runNext();
   };
@@ -329,7 +346,7 @@ export default function TextQC({ report = () => {} }) {
       else if (e.key === "ArrowLeft") { e.preventDefault(); setReview((r) => Math.max(r - 1, 0)); }
       else if (e.key === "Escape") setReview(null);
       else if (e.key === "Enter" && isAE && cur.suggestions.length) { e.preventDefault(); fix(cur, cur.suggestions[0]); }
-      else if (e.key.toLowerCase() === "g" && cur.places[0].containerId) jump(cur.places[0]);
+      else if (e.key.toLowerCase() === "g" && cur.places[0].containerId) jump(cur.places[0], true);
       else if (e.key.toLowerCase() === "i") mark([cur.id], "ignored");
       else if (e.key.toLowerCase() === "c") mark([cur.id], "corrected");
     };
@@ -372,7 +389,7 @@ export default function TextQC({ report = () => {} }) {
           <button className="icon-btn" onClick={() => setReview(null)} aria-label="Close review"><Close /></button>
         </div>
         <div className="review-bar" aria-hidden="true"><div style={{ transform: `scaleX(${(idx + 1) / queue.length})` }} /></div>
-        <Where p={cur.places[0]} onGo={() => jump(cur.places[0])} />
+        <Where p={cur.places[0]} onGo={() => jump(cur.places[0], true)} />
         {cur.places.length > 1 && <p className="also">Same text in {plural(cur.places.length - 1, "other place")}{isAE ? "; a change applies to all of them." : "."}</p>}
         <Proofed g={cur} big />
         {cur.cat !== "typo" && cur.cat !== "unknown" && cur.message && <p className="why">{cur.message}</p>}
@@ -384,6 +401,7 @@ export default function TextQC({ report = () => {} }) {
         <label className="check-inline auto-go"><input type="checkbox" checked={autoGo} onChange={() => setAutoGo(!autoGo)} /> Go to each one automatically</label>
         <p className="keys">Keys: <kbd>&larr;</kbd> <kbd>&rarr;</kbd> move{isAE ? <>, <kbd>Enter</kbd> use the first suggestion</> : null}, <kbd>G</kbd> go to, <kbd>C</kbd> corrected, <kbd>I</kbd> ignore, <kbd>Esc</kbd> close.</p>
         {jumpNote && <p className="msg warn">{jumpNote} <button className="link-btn" onClick={() => setJumpNote("")}>OK</button></p>}
+        {where && <p className="msg">{where}</p>}
         {err && <p className="msg bad">{err}</p>}
         {note && <p className="msg good">{note}</p>}
       </div>
@@ -476,6 +494,7 @@ export default function TextQC({ report = () => {} }) {
 
       <div aria-live="polite">
         {jumpNote && <p className="msg warn">{jumpNote} <button className="link-btn" onClick={() => setJumpNote("")}>OK</button></p>}
+        {where && <p className="msg">{where}</p>}
         {err && <p className="msg bad">{err}</p>}
         {note && <p className="msg good">{note}</p>}
       </div>
@@ -556,7 +575,7 @@ export default function TextQC({ report = () => {} }) {
                     <div className="row-body">
                       <Proofed g={g} />
                       {g.cat !== "typo" && g.cat !== "unknown" && g.message && <p className="why">{g.message}</p>}
-                      {g.places.map((p, i) => <Where key={i} p={p} onGo={() => jump(p)} />)}
+                      {g.places.map((p, i) => <Where key={i} p={p} onGo={() => jump(p, true)} />)}
                       <Actions g={g} />
                     </div>
                   )}
@@ -605,7 +624,7 @@ export default function TextQC({ report = () => {} }) {
                         {c.bin && <span className="lost-bin">In the {c.bin} bin</span>}
                         <span className="lost-why">{c.why}</span>
                         <span className="lost-acts">
-                          <button className="ghost tight" onClick={() => jump(c)}><Target /> Go to</button>
+                          <button className="ghost tight" onClick={() => jump(c, true)}><Target /> Go to</button>
                           {c.nodeId && <button className="ghost tight" onClick={() => { setErr(""); host("prReveal", { nodeId: c.nodeId, binPath: c.bin }).catch(fail); }}>Show in project</button>}
                         </span>
                       </li>

@@ -145,19 +145,26 @@
         return { added: added };
     };
 
-    // Move the playhead to the problem. Kept deliberately small: changing the clip selection
-    // (getSelection / setSelected) from a script can crash some Premiere versions, so it only
-    // opens the sequence when it isn't already the open one, then moves the playhead.
-    api.prJump = function (g) {
+    // Go to a time in a sequence, in two separate steps, because opening a sequence and moving
+    // its playhead in the same script call can crash Premiere (the sequence opens in the
+    // background, so the playhead move hits a sequence that isn't ready yet):
+    //   - the sequence is already the open one: move the playhead -> { moved: true }
+    //   - it isn't, and a.open: only open it -> { opened: true }; the panel waits and calls again
+    //   - it isn't, and not a.open (automatic jumps): do nothing -> { other: name }
+    api.prJump = function (a) {
         var seq = app.project.activeSequence;
-        if (!seq || seq.sequenceID !== g.containerId) {
-            var target = seqById(g.containerId);
-            app.project.openSequence(target.sequenceID);
-            seq = app.project.activeSequence;
-            if (!seq || seq.sequenceID !== g.containerId) throw new Error("Couldn't open that sequence. Open it in the timeline and try again.");
+        if (seq && seq.sequenceID === a.containerId) {
+            seq.setPlayerPosition(String(a.startTicks));
+            return { moved: true };
         }
-        seq.setPlayerPosition(String(g.startTicks));
-        return true;
+        var target = null;
+        for (var s = 0; s < app.project.sequences.numSequences; s++) {
+            if (app.project.sequences[s].sequenceID === a.containerId) { target = app.project.sequences[s]; break; }
+        }
+        if (!target) throw new Error("Sequence not found. Was it deleted?");
+        if (!a.open) return { other: target.name };
+        app.project.openSequence(target.sequenceID);
+        return { opened: true, name: target.name };
     };
 
     // Close the gap by stretching the clip before it (or pulling the clip after it back, at the start).
