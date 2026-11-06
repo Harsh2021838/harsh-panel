@@ -2,7 +2,8 @@
 // Premiere also cuts that don't line up across tracks, audio out of sync, and black or offline clips.
 // Host side: jsx/gap-qc.jsx. Each gap is drawn as a tiny timeline so it reads at a glance.
 import React, { useEffect, useState } from "react";
-import { makeHost, hostApp } from "../../host.js";
+import { makeHost, hostApp, nodeRequire } from "../../host.js";
+import { toolDir, lib } from "../../library.js";
 import { Target, Forward } from "../../icons.jsx";
 import { timecode } from "../text-qc/premiere-sources.js";
 
@@ -13,20 +14,24 @@ const plural = (n, one, many) => n + " " + (n === 1 ? one : many || one + "s");
 // What Premiere can look for. After Effects only looks for gaps.
 const CHECKS = [
   ["gaps", "Gaps"],
-  ["cuts", "Cuts that don\u2019t line up"],
+  ["cuts", "Cuts & flash frames"],
   ["sync", "Audio out of sync"],
   ["black", "Black or offline clips"],
+  ["rate", "Frame rate"],
+  ["dups", "Same shot twice"],
 ];
 const GAP_KINDS = { start: 1, between: 1, end: 1 };
 const isGap = (g) => !!GAP_KINDS[g.kind];
-const MARKER_COLOR = { start: 1, between: 1, end: 1, cut: 3, sync: 5, blackvideo: 0, offline: 0 }; // red, orange, purple, green
+const MARKER_COLOR = { start: 1, between: 1, end: 1, cut: 3, flash: 3, sync: 5, blackvideo: 0, offline: 0, subframe: 7, fps: 6, dup: 4 }; // red, orange, purple, green
 
 const KEY = "harsh.gapqc.";
 const lsGet = (k, d) => { try { const v = localStorage.getItem(KEY + k); return v === null ? d : JSON.parse(v); } catch (e) { return d; } };
 const lsSet = (k, v) => { try { localStorage.setItem(KEY + k, JSON.stringify(v)); } catch (e) {} };
 
+// Short lengths in frames, long ones (gaps of any length) in seconds.
+const len = (g) => (g.frames > g.fps * 1.5 ? (g.frames / g.fps).toFixed(1) + " sec" : plural(g.frames, "frame"));
 function what(g) {
-  const f = plural(g.frames, "frame");
+  const f = len(g);
   if (g.kind === "start") return f + " empty at the start";
   if (g.kind === "end") {
     if (!isAE) return g.trackName + " ends " + f + " early";
@@ -34,9 +39,13 @@ function what(g) {
   }
   if (g.kind === "cut") return "Cuts " + plural(g.frames, "frame") + " apart";
   if (g.kind === "sync") return "Audio " + plural(g.frames, "frame") + (g.audioEarly ? " early" : " late");
+  if (g.kind === "flash") return g.frames + "-frame clip (flash frame)";
+  if (g.kind === "subframe") return "Not on a whole frame";
+  if (g.kind === "fps") return g.rate + " fps clip in a " + g.seqRate + " fps sequence";
+  if (g.kind === "dup") return "Same shot used " + g.count + " times";
   if (g.kind === "blackvideo") return "Black Video clip";
   if (g.kind === "offline") return "Media offline";
-  return g.frames + "-frame gap";
+  return g.frames > g.fps * 1.5 ? f + " gap" : g.frames + "-frame gap";
 }
 function detail(g) {
   const q = (s) => "“" + s + "”";
@@ -47,6 +56,10 @@ function detail(g) {
   }
   if (g.kind === "cut") return q(g.prev) + " and " + q(g.next) + " cut " + plural(g.frames, "frame") + " apart, so the wrong shot flashes between them. Line the cuts up.";
   if (g.kind === "sync") return "The audio of " + q(g.prev) + " plays " + plural(g.frames, "frame") + (g.audioEarly ? " before" : " after") + " its picture. Slip or move it back into sync.";
+  if (g.kind === "flash") return q(g.prev) + " is only " + plural(g.frames, "frame") + " long, so it flashes on screen. Delete it or make it longer.";
+  if (g.kind === "subframe") return q(g.prev) + " starts " + g.part + "% of the way into a frame, which can cause a flash or a blend at the cut. Nudge it onto the frame.";
+  if (g.kind === "fps") return q(g.prev) + " is " + g.rate + " fps; the sequence is " + g.seqRate + " fps. Fine for slow motion, otherwise it may stutter.";
+  if (g.kind === "dup") return q(g.prev) + " is used at " + g.uses.map((u) => u.track + " " + u.tc).join(", ") + ". Check that\u2019s on purpose.";
   if (g.kind === "blackvideo") return q(g.prev) + " is a Black Video clip. Check it\u2019s meant to be there.";
   if (g.kind === "offline") return "The media for " + q(g.prev) + " is offline. Relink it before export.";
   return "Between " + q(g.prev) + " and " + q(g.next) + ".";
@@ -71,13 +84,23 @@ function GapPicture({ g }) {
       </span>
     );
   }
+  if (g.kind === "flash" || g.kind === "subframe" || g.kind === "fps" || g.kind === "dup") {
+    return (
+      <span className={"gap-pic solo " + g.kind} aria-hidden="true">
+        <i className="clip" />
+        {g.kind === "flash" ? <i className="hole" style={{ width: Math.min(6 + g.frames * 4, 26) }}><b className="num">{g.frames}</b></i>
+          : <i className="mark-clip">{g.kind === "fps" ? "fps" : g.kind === "dup" ? "\u00D7" + g.count : "\u00BD"}</i>}
+        <i className="clip" />
+      </span>
+    );
+  }
   if (g.kind === "blackvideo" || g.kind === "offline") {
     return <span className={"gap-pic solo " + g.kind} aria-hidden="true"><i className="clip" /><i className="bad-clip">{g.kind === "offline" ? "?" : ""}</i><i className="clip" /></span>;
   }
   return (
     <span className={"gap-pic" + (g.black ? " black" : "")} aria-hidden="true">
       <i className={"clip" + (g.kind === "start" ? " none" : "")} />
-      <i className="hole" style={{ width: w }}><b className="num">{g.frames}</b></i>
+      <i className="hole" style={{ width: w }}><b className="num">{g.frames > 99 ? "" : g.frames}</b></i>
       <i className={"clip" + (g.kind === "end" ? " none" : "")} />
     </span>
   );
@@ -94,7 +117,7 @@ export default function GapQC({ report = () => {} }) {
   const [err, setErr] = useState("");
   const [note, setNote] = useState("");
   const [showIgnored, setShowIgnored] = useState(false);
-  const [checks, setChecks] = useState(() => ({ gaps: true, cuts: true, sync: true, black: true, ...lsGet("checks", {}) }));
+  const [checks, setChecks] = useState(() => ({ gaps: true, cuts: true, sync: true, black: true, rate: true, dups: false, ...lsGet("checks", {}) }));
   const [autoGo, setAutoGo] = useState(() => lsGet("autoGo", true));
   useEffect(() => { lsSet("checks", checks); }, [checks]);
   useEffect(() => { lsSet("autoGo", autoGo); }, [autoGo]);
@@ -116,7 +139,7 @@ export default function GapQC({ report = () => {} }) {
     const t0 = performance.now();
     try {
       const r = await call(isAE ? "aeScan" : "prScan", { scope, maxFrames, audio, checks: isAE ? { gaps: true } : checks });
-      r.gaps.forEach((g) => { g.tc = timecode(g.time, g.fps); });
+      r.gaps.forEach((g) => { g.tc = timecode(g.time, g.fps); if (g.uses) g.uses.forEach((u) => { u.tc = timecode(u.t, g.fps); }); });
       // Black flashes first, then by place in the edit.
       const rank = (g) => (g.kind === "offline" ? 0 : g.black ? 1 : 2);
       r.gaps.sort((a, b) => (rank(a) - rank(b)) || (a.container < b.container ? -1 : a.container > b.container ? 1 : a.time - b.time));
@@ -156,6 +179,24 @@ export default function GapQC({ report = () => {} }) {
     let n = 0;
     try { for (const id in by) n += (await call("prMarkers", { containerId: id, items: by[id] })).added; setNote("Added " + plural(n, "marker") + " to the timeline."); }
     catch (e) { setErr(e.message); }
+  }
+  function saveReport() {
+    setErr(""); setNote("");
+    try {
+      const fs = nodeRequire("fs"), path = nodeRequire("path");
+      const cell = (v) => '"' + String(v == null ? "" : v).replace(/"/g, '""') + '"';
+      const rows = [["Problem", "Where", "Track", "Timecode", "Details", "Status"]].concat(run.gaps.map((g) =>
+        [what(g), g.container, g.trackName || "", g.tc, detail(g), state[g.key] || "to fix"]));
+      toolDir("Gap QC").then((dir) => {
+        const out = path.join(dir, "Reports");
+        if (!fs.existsSync(out)) fs.mkdirSync(out, { recursive: true });
+        const stamp = new Date().toISOString().slice(0, 16).replace(/[T:]/g, "-");
+        const file = path.join(out, String(run.project).replace(/\.[^.]+$/, "").replace(/[\\/:*?"<>|]/g, "_") + " " + stamp + ".csv");
+        fs.writeFileSync(file, "\ufeff" + rows.map((r) => r.map(cell).join(",")).join("\r\n"), "utf8");
+        setNote("Saved the report to Harsh Library \u203A Tools \u203A Gap QC \u203A Reports.");
+        lib("openFolder", { path: out }).catch(() => {});
+      }).catch((e) => setErr(e.message));
+    } catch (e) { setErr(e.message); }
   }
   const jump = (g) => { setErr(""); call(isAE ? "aeJump" : "prJump", g).catch((e) => setErr(e.message)); };
   async function fix(g) {
@@ -198,11 +239,11 @@ export default function GapQC({ report = () => {} }) {
         <div className="gap-size">
           <span className="gap-size-label">{isAE ? "Gaps up to" : "Up to"}</span>
           <div className="seg small" role="radiogroup" aria-label="Largest gap to look for, in frames">
-            {[1, 2, 3, 4, 5, 10].map((n) => (
-              <button key={n} role="radio" aria-checked={maxFrames === n} className={maxFrames === n ? "on" : ""} disabled={busy} onClick={() => setMaxFrames(n)}>{n}</button>
+            {[1, 2, 3, 5, 10, 0].map((n) => (
+              <button key={n} role="radio" aria-checked={maxFrames === n} className={maxFrames === n ? "on" : ""} disabled={busy} onClick={() => setMaxFrames(n)}>{n || "Any"}</button>
             ))}
           </div>
-          <span className="gap-size-label">frames</span>
+          <span className="gap-size-label">{maxFrames ? "frames" : "length"}</span>
         </div>
         {!isAE && checks.gaps && <label className="check-inline"><input type="checkbox" checked={audio} disabled={busy} onChange={() => setAudio(!audio)} /> Gaps on audio tracks too</label>}
 
@@ -227,6 +268,7 @@ export default function GapQC({ report = () => {} }) {
             <div className="summary-acts">
               {gapsTodo.length > 1 && <button className="primary" onClick={fixAll}>Close all {gapsTodo.length} gaps</button>}
               {!isAE && <button className="ghost" onClick={addMarkers}>Add markers</button>}
+              <button className="ghost" onClick={saveReport}>Save report</button>
             </div>
           )}
           {todo.length > 0 && <label className="check-inline auto-go"><input type="checkbox" checked={autoGo} onChange={() => setAutoGo(!autoGo)} /> Go to each one when I open it</label>}

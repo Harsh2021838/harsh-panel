@@ -65,7 +65,9 @@
     function prSequence(seq, a, out) {
         var frame = Number(seq.timebase);
         if (!frame) return;
-        var max = a.maxFrames * frame + frame / 2;
+        // maxFrames 0 = gaps of any length. Cuts and flash frames always use a few frames at most.
+        var max = (a.maxFrames > 0 ? a.maxFrames : 1e9) * frame + frame / 2;
+        var small = Math.min(a.maxFrames > 0 ? a.maxFrames : 5, 10) * frame + frame / 2;
         var seqEnd = 0;
         try { seqEnd = Number(seq.end); } catch (e) {}
         var fps = TICKS / frame;
@@ -100,7 +102,7 @@
             var said = {};
             for (var ta = 0; ta < cuts.length; ta++) for (var tb = ta + 1; tb < cuts.length; tb++) {
                 for (var ia = 0; ia < cuts[ta].length; ia++) {
-                    var ca = cuts[ta][ia], best = null, bestD = max;
+                    var ca = cuts[ta][ia], best = null, bestD = small;
                     for (var ib = 0; ib < cuts[tb].length; ib++) {
                         var d = Math.abs(cuts[tb][ib].at - ca.at);
                         if (d < frame / 2) { best = null; bestD = -1; break; } // lines up with a cut on that track
@@ -146,6 +148,51 @@
                 issue(why, bt, "V" + (bt + 1), bc.start, bc.end, bc, null, {});
             }
         }
+        // Flash frames: a clip only a few frames long.
+        if (checks.cuts) {
+            for (var ft = 0; ft < V.length; ft++) for (var fi = 0; fi < V[ft].length; fi++) {
+                var fc = V[ft][fi];
+                if (fc.off || /adjustment layer/i.test(fc.name)) continue;
+                if (fc.end - fc.start > frame / 2 && fc.end - fc.start <= small) issue("flash", ft, "V" + (ft + 1), fc.start, fc.end, fc, null, {});
+            }
+        }
+        // Frame rate problems: clips not starting on a whole frame, and footage at another frame rate.
+        if (checks.rate) {
+            var seenRate = {};
+            for (var rt = 0; rt < V.length; rt++) for (var ri = 0; ri < V[rt].length; ri++) {
+                var rc = V[rt][ri];
+                if (rc.off) continue;
+                var part = (rc.start % frame) / frame;
+                if (part > 0.05 && part < 0.95) issue("subframe", rt, "V" + (rt + 1), rc.start, rc.start, rc, null, { part: Math.round(part * 100) });
+                if (!rc.item || seenRate[rc.node]) continue;
+                seenRate[rc.node] = true;
+                var rate = 0;
+                try { rate = Number(rc.item.getFootageInterpretation().frameRate); } catch (e) {}
+                if (rate > 1000) rate = TICKS / rate;
+                if (rate > 0 && rate < 1000 && Math.abs(rate - fps) > 0.01) issue("fps", rt, "V" + (rt + 1), rc.start, rc.end, rc, null, { rate: Math.round(rate * 100) / 100, seqRate: Math.round(fps * 100) / 100 });
+            }
+        }
+        // The same shot used more than once.
+        if (checks.dups) {
+            var uses = {}, orderD = [];
+            for (var dt = 0; dt < V.length; dt++) for (var di = 0; di < V[dt].length; di++) {
+                var dc = V[dt][di];
+                if (dc.off || !dc.node || !dc.item) continue;
+                var nm = String(dc.item.name || "");
+                if (/adjustment layer|black video|color matte|colour matte|transparent video|graphic|title|\.aep|\.mogrt/i.test(nm)) continue;
+                try { if (dc.item.isSequence && dc.item.isSequence()) continue; } catch (e) {}
+                if (!uses[dc.node]) { uses[dc.node] = []; orderD.push(dc.node); }
+                uses[dc.node].push({ track: dt, clip: dc });
+            }
+            for (var u = 0; u < orderD.length; u++) {
+                var list2 = uses[orderD[u]];
+                if (list2.length < 2) continue;
+                var times = [];
+                for (var w = 0; w < list2.length; w++) times.push({ t: list2[w].clip.start / TICKS, track: "V" + (list2[w].track + 1) });
+                issue("dup", list2[0].track, "V" + (list2[0].track + 1), list2[0].clip.start, list2[0].clip.end, list2[0].clip, list2[1].clip,
+                    { uses: times, count: list2.length, trackB: list2[1].track });
+            }
+        }
         for (var k = 0; k < kinds.length; k++) {
             var letter = kinds[k][0], tracks = kinds[k][1], all = [];
             all = letter === "V" ? V : A;
@@ -170,11 +217,14 @@
                 // Between clips
                 for (var i = 0; i + 1 < list.length; i++) {
                     var gap = list[i + 1].start - list[i].end;
-                    if (gap > frame / 2 && gap <= max) push("between", list[i].end, list[i + 1].start, list[i], list[i + 1]);
+                    // Long gaps on upper tracks are normal (titles come and go); only report them when they show black.
+                    var big = gap > small && (letter === "A" || (t > 0 && covered(below, list[i].end, list[i + 1].start)));
+                    if (gap > frame / 2 && gap <= max && !big) push("between", list[i].end, list[i + 1].start, list[i], list[i + 1]);
                 }
                 // A track ending a few frames before the sequence does
                 var last = list[list.length - 1];
-                if (seqEnd && seqEnd - last.end > frame / 2 && seqEnd - last.end <= max) push("end", last.end, seqEnd, last, null);
+                var tail = seqEnd - last.end, bigTail = tail > small && (letter === "A" || (t > 0 && covered(below, last.end, seqEnd)));
+                if (seqEnd && tail > frame / 2 && tail <= max && !bigTail) push("end", last.end, seqEnd, last, null);
             }
         }
     }
@@ -225,7 +275,7 @@
             var sel = seq.getSelection();
             for (var i = 0; i < sel.length; i++) sel[i].setSelected(false, false);
             var tr = prTracks(seq, g)[g.track];
-            var tr2 = g.kind === "cut" ? seq.videoTracks[g.trackB] : g.kind === "sync" ? seq.audioTracks[g.audioTrack] : tr;
+            var tr2 = (g.kind === "cut" || g.kind === "dup") ? seq.videoTracks[g.trackB] : g.kind === "sync" ? seq.audioTracks[g.audioTrack] : tr;
             if (g.prevIndex >= 0) tr.clips[g.prevIndex].setSelected(true, true);
             if (g.nextIndex >= 0) tr2.clips[g.nextIndex].setSelected(true, true);
         } catch (e) {}

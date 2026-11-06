@@ -207,13 +207,16 @@
       getMediaPath: function () { return "/Users/harsh/Projects/Brightline/Brightline_GFX.aep"; }, isSequence: function () { return false; },
       select: function () { log("Premiere selected \u201COld Title Card\u201D in the AE Comps bin of the Project panel."); } };
     var itemA = { name: "Interview_A.mp4", nodeId: "ia-1", getMediaPath: function () { return "/Footage/Interview_A.mp4"; }, isSequence: function () { return false; } };
+    var drone = { name: "Drone_01.mp4", nodeId: "dr-1", getMediaPath: function () { return "/Footage/Drone_01.mp4"; }, isSequence: function () { return false; },
+      getFootageInterpretation: function () { return { frameRate: 29.97 }; } };
     var blackItem = { name: "Black Video", nodeId: "bv-1", getMediaPath: function () { return ""; }, isSequence: function () { return false; } };
     var seqs = arr([
       seq("Main Edit 16x9", [
         [clip("Interview_A.mp4", 0, null, null, itemA, 20), clip("Interview_B.mp4", 20 + 3 / 24, null, null, null, 21.375)],
         [clip("Graphic", 2, [textComp("Introducing the new Brightline app")]), clip("Graphic", 9.5, [textComp("Your money,​ sorted in minutes")]),
          clip("Lower Third", 15, [], [["Name", "Priya Raman"], ["Title", "Head of Prodcut"], ["Opacity", 100]]),
-         clip("B-roll_Phone.mp4", 20 + 1 / 24, null, null, null, 1.9), clip("Black Video", 30, null, null, blackItem, 0.5)],
+         clip("B-roll_Phone.mp4", 20 + 1 / 24, null, null, null, 1.9), clip("Black Video", 30, null, null, blackItem, 0.5), clip("Drone_01.mp4", 25, null, null, drone, 2), clip("Flash_Cut.mp4", 33, null, null, null, 2 / 24),
+         clip("Drone_01.mp4", 35 + 0.3 / 24, null, null, drone, 2)],
         [clip("Graphic", 22, [textComp("Recieve instant alerts")], null, null, 9 - 2 / 24), clip("End Tag", 38.5, [], null, aep), clip("Old Title Card", 31, [], null, ghost, 7.5 - 1 / 24)]
       ]),
       seq("Reel 9x16", [

@@ -12,7 +12,7 @@ import SoundKit from "./tools/sound-kit/SoundKit.jsx";
 import GapQC from "./tools/gap-qc/GapQC.jsx";
 import "./styles.css";
 
-const VERSION = "2.9.0";
+const VERSION = "2.10.0";
 
 // The four sections. Add a tool by putting it in a section's `tools` list
 // (or drop a plugin file into /plugins, see plugins/README.md).
@@ -25,7 +25,7 @@ const SECTIONS = [
   {
     id: "qc", name: "QC", icon: Check, empty: "Checks you run before export.", tools: [
       { id: "text-qc", name: "Text QC", description: "Spelling, grammar and spacing in every piece of on-screen text", icon: Proof, hosts: ["AEFT", "PPRO"], Component: TextQC },
-      { id: "gap-qc", name: "Gap QC", description: "Gaps, cuts that don\u2019t line up, audio out of sync, black or offline clips", icon: GapIcon, hosts: ["AEFT", "PPRO"], Component: GapQC },
+      { id: "gap-qc", name: "Gap QC", description: "Gaps, flash frames, cuts that don\u2019t line up, audio sync, black, offline and frame-rate problems", icon: GapIcon, hosts: ["AEFT", "PPRO"], Component: GapQC },
     ],
   },
 ];

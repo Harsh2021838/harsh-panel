@@ -539,3 +539,6 @@ input[type="checkbox"] { accent-color: var(--mark); margin: 0; width: 13px; heig
 .gap-pic.cut .hole.thin { background: repeating-linear-gradient(135deg, rgba(242, 178, 92, 0.8) 0 2px, transparent 2px 4px); }
 .gap-pic.solo .bad-clip { flex: none; width: 26px; height: 14px; margin: 0 2px; border-radius: 3px; background: #000; box-shadow: inset 0 0 0 1px rgba(255, 123, 107, 0.8); color: var(--bad); font-size: 10px; font-weight: 700; display: grid; place-items: center; font-style: normal; }
 .look-for .chip.on::before { content: "\2713"; margin-right: 5px; color: var(--good); font-weight: 700; }
+.gap-pic.solo .mark-clip { flex: none; min-width: 26px; height: 14px; margin: 0 2px; padding: 0 3px; border-radius: 3px; display: grid; place-items: center; font-style: normal; font-size: 9px; font-weight: 700;
+  color: var(--ink); background: rgba(160, 140, 255, 0.28); box-shadow: inset 0 0 0 1px rgba(160, 140, 255, 0.7); }
+.gap-pic.dup .mark-clip { background: rgba(89, 168, 255, 0.25); box-shadow: inset 0 0 0 1px rgba(89, 168, 255, 0.7); }
