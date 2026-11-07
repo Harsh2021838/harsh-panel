@@ -5,6 +5,7 @@ export const nodeRequire =
   : window.cep_node && window.cep_node.require ? window.cep_node.require
   : null;
 
+import { trace } from "./trace.js";
 const cep = window.__adobe_cep__;
 
 function hostEnv() {
@@ -52,7 +53,13 @@ export function hostIdle() {
 export function evalRaw(code) {
   hostUsed = true;
   inFlight++;
-  return new Promise((resolve) => cep.evalScript(asciiScript(code), (r) => { inFlight = Math.max(0, inFlight - 1); resolve(r); }));
+  const label = /selSignature/.test(code) ? "" : String(code).replace(/\$\.evalFile\([^)]*\);?/g, "load script; ").slice(0, 90);
+  if (label) trace("-> " + label);
+  return new Promise((resolve) => cep.evalScript(asciiScript(code), (r) => {
+    inFlight = Math.max(0, inFlight - 1);
+    if (label) trace("<- " + String(r).slice(0, 40));
+    resolve(r);
+  }));
 }
 
 // The current app session: an id kept in the app's script engine, which lives exactly as long as

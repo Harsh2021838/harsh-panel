@@ -60,8 +60,7 @@ export default function Settings({ clients, active, onLibraryChanged, openGuide,
     setBusy("Installing Frameshift " + u.version + "\u2026");
     await new Promise((r) => setTimeout(r, 30));
     const backup = await installUpdate(u, version);
-    say("Installed " + u.version + ". The old version is saved in " + backup + ". Reloading\u2026");
-    setTimeout(() => hostIdle().then(() => location.reload()), 900); // never reload mid-command
+    say("Installed " + u.version + ". It starts the next time you open this panel. The old version is saved in " + backup + ".");
   }
 
   async function move(mode) {

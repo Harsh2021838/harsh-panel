@@ -4,7 +4,8 @@ import { hostApp, hostName, hostBackground, onThemeChange, extensionPath, host }
 import { Wrench, Image, Helix, Check, Proof, Back, Chevron, Gear, Caret, Plus, Wave, GapIcon, VaultIcon, EaseIcon } from "./icons.jsx";
 import Settings from "./sections/Settings.jsx";
 import { findUpdate, installUpdate, updateMode, downloadUpdate } from "./updater.js";
-import { hostIdle, hostWasUsed } from "./host.js";
+import { hostIdle } from "./host.js";
+import { trace, lastRun } from "./trace.js";
 import ClientDNA, { ClientLogo } from "./sections/ClientDNA.jsx";
 import Assets from "./sections/Assets.jsx";
 import { listClients } from "./library.js";
@@ -16,7 +17,7 @@ import AudioQC from "./tools/audio-qc/AudioQC.jsx";
 import CompVault from "./tools/comp-vault/CompVault.jsx";
 import "./styles.css";
 
-const VERSION = "2.20.0";
+const VERSION = "2.20.1";
 
 // The four sections. Add a tool by putting it in a section's `tools` list
 // (or drop a plugin file into /plugins, see plugins/README.md).
@@ -101,14 +102,22 @@ function App() {
   const [update, setUpdate] = useState(null);   // a newer version waiting in the Updates folder
   const [updated, setUpdated] = useState(() => { try { const j = localStorage.getItem("harsh.justUpdated"); localStorage.removeItem("harsh.justUpdated"); return j ? JSON.parse(j) : null; } catch (e) { return null; } });
   const [updating, setUpdating] = useState("");
+  // Did the panel stop without closing last time? The step log says what it was doing.
+  const [stopped, setStopped] = useState(() => {
+    const prev = lastRun(), end = prev[prev.length - 1] || "";
+    trace("open Frameshift " + VERSION + " in " + hostName);
+    return prev.length && !/ (closed|open Frameshift)/.test(end) ? prev : null;
+  });
+  useEffect(() => { const bye = () => trace("closed"); window.addEventListener("beforeunload", bye); return () => window.removeEventListener("beforeunload", bye); }, []);
   // Install, but only once Premiere has finished every command Harsh sent it: reloading the panel
   // while a command is still running inside the app can crash it.
+  // The panel is never reloaded: reloading a running panel is what crashed Premiere's panel engine
+  // (CEPHtmlEngine). The new files are written now and start the next time the panel opens.
   const install = (u) => {
     setUpdating("Installing Frameshift " + u.version + "\u2026");
     hostIdle()
       .then(() => installUpdate(u, VERSION))
-      .then(() => hostIdle())
-      .then(() => location.reload())
+      .then(() => { try { localStorage.setItem("harsh.installedNext", u.version); } catch (e) {} setUpdate(null); setUpdating("Frameshift " + u.version + " is installed. It starts the next time you open this panel."); })
       .catch((e) => setUpdating("Couldn\u2019t update: " + e.message));
   };
   useEffect(() => {
@@ -118,7 +127,12 @@ function App() {
     // in the bar at the top (or it installs the next time the panel opens).
     const check = () => downloadUpdate(VERSION).catch(() => null)
       .then(() => findUpdate(VERSION))
-      .then((u) => { if (!u) return; if (updateMode() === "auto" && !hostWasUsed()) install(u); else setUpdate(u); })
+      .then((u) => {
+        if (!u) return;
+        let waiting = ""; try { waiting = localStorage.getItem("harsh.installedNext") || ""; } catch (e) {}
+        if (waiting === u.version) { setUpdating("Frameshift " + u.version + " is installed. It starts the next time you open this panel."); return; }
+        if (updateMode() === "auto") install(u); else setUpdate(u);
+      })
       .catch(() => {});
     const t = setTimeout(check, 1500);
     const iv = setInterval(check, 4 * 3600 * 1000);
@@ -143,10 +157,11 @@ function App() {
   const section = sections.find((s) => s.id === tab) || sections[0];
   const current = section.tools.find((t) => t.id === openTool[section.id]);
   const open = (t) => {
+    trace("tool " + t.id);
     if (mounted.indexOf(t) === -1) setMounted(mounted.concat([t]));
     setOpenTool({ ...openTool, [section.id]: t.id });
   };
-  const close = () => setOpenTool({ ...openTool, [section.id]: null });
+  const close = () => { trace("back from tool"); setOpenTool({ ...openTool, [section.id]: null }); };
   const report = (id) => (s) => setStatus((all) => ({ ...all, [id]: s }));
   const badge = (sec) => sec.tools.reduce((n, t) => n + ((status[t.id] && status[t.id].count) || 0), 0);
 
@@ -179,6 +194,13 @@ function App() {
         <button className={"icon-btn" + (settingsOpen ? " on" : "")} onClick={() => setSettingsOpen(!settingsOpen)} aria-label="Settings" aria-pressed={settingsOpen} title="Settings"><Gear size={15} /></button>
       </header>
 
+      {stopped && (
+        <div className="banner" role="status">
+          <span className="grow">The panel stopped unexpectedly last time, right after: <b>{(stopped[stopped.length - 1] || "").slice(13)}</b></span>
+          <button className="ghost tight strong" onClick={() => { try { navigator.clipboard.writeText(stopped.join("\n")); } catch (e) {} setStopped(null); }}>Copy details</button>
+          <button className="icon-btn small" onClick={() => setStopped(null)} aria-label="Dismiss">&times;</button>
+        </div>
+      )}
       {(update || updated || updating) && (
         <div className={"banner" + (updated && !update && !updating ? " done" : "")} role="status">
           {updating ? <span className="grow">{updating}</span>
