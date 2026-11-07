@@ -92,3 +92,6 @@ export const Join = ({ size = 16 }) => (
 export const VaultIcon = ({ size = 18 }) => (
   <svg {...base(size)}><rect x="3.5" y="4.5" width="17" height="15" rx="2.5" /><circle cx="12" cy="12" r="3.2" /><path d="M12 8.8v-1M15.2 12h1M12 15.2v1M8.8 12h-1M6.5 19.5v1.5M17.5 19.5v1.5" /></svg>
 );
+export const EaseIcon = ({ size = 22 }) => (
+  <svg {...base(size)}><path d="M3 20c7 0 7-16 18-16" /><circle cx="3" cy="20" r="1.4" /><circle cx="21" cy="4" r="1.4" /><path d="M3 20h5M21 4h-5" /></svg>
+);

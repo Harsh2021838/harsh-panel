@@ -44,6 +44,7 @@ export function asciiScript(code) {
 let inFlight = 0;
 let hostUsed = false;
 export function hostWasUsed() { return hostUsed; }
+export function hostBusy() { return inFlight > 0; }
 export function hostIdle() {
   return new Promise((resolve) => { const t = () => (inFlight === 0 ? resolve() : setTimeout(t, 200)); t(); });
 }

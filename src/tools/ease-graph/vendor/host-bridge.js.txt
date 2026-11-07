@@ -1,0 +1,82 @@
+/* EaseGraph — bridge to Premiere (CEP evalScript) with a built-in demo host */
+(function (root) {
+  'use strict';
+  var TPS = 254016000000;
+  var cep = root.__adobe_cep__;
+
+  function callPremiere(fn, arg) {
+    return new Promise(function (resolve, reject) {
+      var script = 'FrameshiftEG.' + fn + '(' + (arg === undefined ? '' : JSON.stringify(JSON.stringify(arg))) + ')';
+      cep.evalScript(script, function (res) {
+        if (res === 'EvalScript error.' || res == null) {
+          return reject(new Error('Premiere script error. Is the host script loaded?'));
+        }
+        var out;
+        try { out = JSON.parse(res); } catch (e) { return reject(new Error('Bad reply: ' + res)); }
+        if (out.ok) resolve(out.data); else reject(new Error(out.error));
+      });
+    });
+  }
+
+  /* ---------- Demo host (runs in a normal browser for testing) ---------- */
+  var fps = 25, tb = TPS / fps;
+  var demo = {
+    seqId: 'demo-seq', timebase: tb, frameW: 1920, frameH: 1080, playhead: Math.round(tb * 10),
+    clips: [{
+      nodeId: 'demo-1', name: 'Title.png', start: 0, end: 4 * TPS, inPoint: 0,
+      params: [
+        { c: 1, p: 0, comp: 'Motion', name: 'Position', keys: [{ t: 0, v: [0.2, 0.5] }, { t: TPS, v: [0.8, 0.5] }] }
+      ]
+    }]
+  };
+  function findDemo(nodeId, c, p) {
+    var clip = demo.clips.filter(function (x) { return x.nodeId === nodeId; })[0];
+    return clip && clip.params.filter(function (x) { return x.c === c && x.p === p; })[0];
+  }
+  function demoValueAt(prm, t) {
+    var k = prm.keys;
+    if (t <= k[0].t) return k[0].v;
+    for (var i = 0; i < k.length - 1; i++) {
+      if (t >= k[i].t && t <= k[i + 1].t) {
+        var r = (t - k[i].t) / (k[i + 1].t - k[i].t);
+        return root.Ease.lerpVal(k[i].v, k[i + 1].v, r);
+      }
+    }
+    return k[k.length - 1].v;
+  }
+  var demoHost = {
+    getSelection: function () { return JSON.parse(JSON.stringify(demo)); },
+    writeRanges: function (spec) {
+      spec.jobs.forEach(function (job) {
+        var prm = findDemo(job.nodeId, job.c, job.p), tol = job.tol || 1;
+        prm.keys = prm.keys.filter(function (k) {
+          if (k.t < job.t0 - tol || k.t > job.t1 + tol) return true;
+          return job.keys.some(function (w) { return Math.abs(w.t - k.t) <= tol; });
+        });
+        job.keys.forEach(function (w) {
+          var ex = prm.keys.filter(function (k) { return Math.abs(k.t - w.t) <= tol; })[0];
+          if (ex) ex.v = w.v; else prm.keys.push({ t: w.t, v: w.v });
+        });
+        prm.keys.sort(function (a, b) { return a.t - b.t; });
+      });
+      return { written: 1 };
+    },
+    valueAt: function (a) { return { v: demoValueAt(findDemo(a.nodeId, a.c, a.p), a.t) }; },
+    selSignature: function () {
+      return demo.clips.map(function (c) { return c.nodeId + c.params.map(function (p) { return p.keys.length; }).join(','); }).join('|');
+    },
+    ping: function () { return { app: 'Demo', version: '0' }; }
+  };
+
+  root.Host = {
+    isPremiere: !!cep,
+    call: function (fn, arg) {
+      if (cep) return callPremiere(fn, arg);
+      return new Promise(function (res, rej) {
+        try { res(demoHost[fn](arg)); } catch (e) { rej(e); }
+      });
+    },
+    setDemoPlayhead: function (t) { demo.playhead = t; },
+    _demo: demo
+  };
+})(window);

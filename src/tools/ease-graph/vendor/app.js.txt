@@ -1,0 +1,858 @@
+/* EaseGraph — panel logic */
+(function () {
+  'use strict';
+  var TPS = 254016000000;
+  var E = window.Ease, H = window.Host;
+  var $ = function (s) { return document.querySelector(s); };
+
+  var state = {
+    data: null,          // selection from Premiere
+    params: [],          // flat list of keyframed params
+    focusKey: null,      // param key shown in table
+    checkedParams: {},   // key -> true (targets for Apply)
+    checkedKeys: {},     // "paramKey|t" -> true
+    curve: clone(E.presets[1].curve),
+        undo: [],
+    busy: false,
+    mode: load('easegraph.mode', 'smart'),   // 'smart' = reads the motion, 'curve' = one curve everywhere
+    auto: load('easegraph.auto', true),      // auto-ease new keyframes
+    seen: {}                                 // keyframes already known, per property
+  };
+
+  function clone(o) { return JSON.parse(JSON.stringify(o)); }
+  function setStatus(msg, kind) {
+    var el = $('#status'); el.textContent = msg || ''; el.className = 'status' + (kind ? ' ' + kind : '');
+  }
+
+  /* ---------------- registry: remembers anchors + curves per param ---------------- */
+  var REG_KEY = 'easegraph.reg.v1';
+  var reg = load(REG_KEY, {});
+  function load(k, d) { try { var v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch (e) { return d; } }
+  function save(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} }
+  function regId(prm) { return state.data.seqId + '|' + prm.nodeId + '|' + prm.c + '|' + prm.p; }
+  function regGet(prm) { return reg[regId(prm)] || null; }
+  function regSet(prm, r) { reg[regId(prm)] = r; save(REG_KEY, reg); }
+
+  /* ---------------- params / anchors ---------------- */
+  function pkey(prm) { return prm.nodeId + '|' + prm.c + '|' + prm.p; }
+  function focusParam() {
+    return state.params.filter(function (x) { return pkey(x) === state.focusKey; })[0] || null;
+  }
+  function stepTicks() { return state.data.timebase * Number($('#step').value); }
+
+  // Anchors = the "real" keys you set. Baked in-between keys are hidden.
+  function getAnchors(prm) {
+    var keys = prm.keys, r = regGet(prm);
+    if (keys.length < 2) return keys.slice();
+    if (r && r.anchors && r.anchors.length >= 2) {
+      var at = {}; r.anchors.forEach(function (t) { at[t] = 1; });
+      var ranges = [];
+      for (var i = 0; i < r.anchors.length - 1; i++) {
+        if (r.curves && r.curves[r.anchors[i]]) ranges.push([r.anchors[i], r.anchors[i + 1]]);
+      }
+      return keys.filter(function (k) {
+        if (at[k.t]) return true;
+        return !ranges.some(function (g) { return k.t > g[0] && k.t < g[1]; });
+      });
+    }
+    // Fallback: detect runs of keys exactly 1 or 2 frames apart (baked earlier)
+    var tb = state.data.timebase;
+    return keys.filter(function (k, i) {
+      if (i === 0 || i === keys.length - 1) return true;
+      var g1 = k.t - keys[i - 1].t, g2 = keys[i + 1].t - k.t;
+      var isStep = Math.abs(g1 - tb) <= 2 || Math.abs(g1 - 2 * tb) <= 2;
+      return !(isStep && g2 <= g1 + 2);
+    });
+  }
+
+  function keyTimeAtPlayhead(prm) {
+    return state.data.playhead - prm.clip.start + prm.clip.inPoint;
+  }
+
+  function segmentsFor(prm, scope) {
+    var A = getAnchors(prm), segs = [];
+    for (var i = 0; i < A.length - 1; i++) segs.push({ a: A[i], b: A[i + 1] });
+    if (scope === 'playhead') {
+      var kt = keyTimeAtPlayhead(prm);
+      segs = segs.filter(function (s) { return kt >= s.a.t && kt < s.b.t; });
+    } else if (scope === 'checked') {
+      if (pkey(prm) !== state.focusKey) return [];
+      var ck = A.filter(function (k) { return state.checkedKeys[pkey(prm) + '|' + k.t]; }).map(function (k) { return k.t; });
+      if (ck.length < 2) return [];
+      var lo = Math.min.apply(null, ck), hi = Math.max.apply(null, ck);
+      segs = segs.filter(function (s) { return s.a.t >= lo && s.b.t <= hi; });
+    }
+    return segs;
+  }
+
+  function targets() {
+    return state.params.filter(function (p) { return p.keys.length >= 2; });
+  }
+
+  /* ---------------- display helpers ---------------- */
+  function isSpatial(prm) {
+    return /motion/i.test(prm.comp) && /^(position|anchor point)$/i.test(prm.name);
+  }
+  function dispScale(prm, dims) {
+    if (isSpatial(prm) && dims === 2) return [state.data.frameW, state.data.frameH];
+    return null;
+  }
+  function toDisp(prm, v) {
+    if (typeof v === 'number') return [v];
+    var s = dispScale(prm, v.length);
+    return v.map(function (x, i) { return s ? x * s[i] : x; });
+  }
+  function fromDisp(prm, arr, like) {
+    if (typeof like === 'number') return arr[0];
+    var s = dispScale(prm, like.length);
+    return arr.map(function (x, i) { return s ? x / s[i] : x; });
+  }
+  function fmt(n) { return (Math.round(n * 100) / 100).toString(); }
+  function fps() { return TPS / state.data.timebase; }
+  function tc(prm, t) {
+    var f = Math.round((t - prm.clip.inPoint + prm.clip.start) / state.data.timebase);
+    var r = Math.round(fps()), ff = f % r, s = Math.floor(f / r);
+    var p2 = function (n) { return (n < 10 ? '0' : '') + n; };
+    return p2(Math.floor(s / 3600)) + ':' + p2(Math.floor(s / 60) % 60) + ':' + p2(s % 60) + ':' + p2(ff);
+  }
+  function parseTc(prm, str) {
+    var parts = String(str).trim().split(/[:;.]/).map(Number);
+    if (parts.some(isNaN)) return null;
+    var r = Math.round(fps()), f;
+    if (parts.length === 1) f = parts[0];
+    else {
+      var ff = parts.pop(), secs = 0;
+      parts.forEach(function (p) { secs = secs * 60 + p; });
+      f = secs * r + ff;
+    }
+    return Math.round(f * state.data.timebase) - prm.clip.start + prm.clip.inPoint;
+  }
+  function curveName(c) {
+    if (!c) return '';
+    var all = E.presets.concat(customPresets());
+    var m = all.filter(function (p) { return E.sameCurve(p.curve, c); })[0];
+    return m ? m.name : 'Custom';
+  }
+
+  /* ---------------- loading ---------------- */
+  function loadSelection(quiet) {
+    return H.call('getSelection').then(function (d) {
+      state.data = d;
+      var list = [];
+      d.clips.forEach(function (clip) {
+        clip.params.forEach(function (p) {
+          p.nodeId = clip.nodeId; p.clipName = clip.name;
+          p.clip = { start: clip.start, inPoint: clip.inPoint, end: clip.end };
+          list.push(p);
+        });
+      });
+      var changedClips = d.clips.map(function (c) { return c.nodeId; }).join() !== state.lastClips;
+      state.lastClips = d.clips.map(function (c) { return c.nodeId; }).join();
+      state.params = list;
+      // New clip selected: start with every property ticked
+      if (changedClips) {
+        state.checkedParams = {};
+        list.forEach(function (p) { if (p.keys.length >= 2) state.checkedParams[pkey(p)] = true; });
+      }
+      if (!focusParam()) state.focusKey = list.length ? pkey(list[0]) : null;
+      renderParams(); renderTable(); drawAll();
+      if (!quiet) {
+        setStatus(list.length ? list.length + ' propert' + (list.length > 1 ? 'ies' : 'y') + ' with keyframes found.'
+          : 'No keyframes on the selected clip. Add 2 keyframes in Effect Controls first.', list.length ? 'ok' : '');
+      }
+    }).catch(function (e) { setStatus(e.message, 'err'); });
+  }
+
+  /* ---------------- writing ---------------- */
+  function snapshot(prm, t0, t1) {
+    return {
+      nodeId: prm.nodeId, c: prm.c, p: prm.p, t0: t0, t1: t1, tol: 2,
+      keys: prm.keys.filter(function (k) { return k.t >= t0 && k.t <= t1; }).map(clone)
+    };
+  }
+  function pushUndo(label, jobs) {
+    state.undo.push({ label: label, jobs: jobs, reg: state.regBefore || clone(reg) });
+    if (state.undo.length > 30) state.undo.shift();
+    $('#btnUndo').disabled = false;
+  }
+  function bakeJob(prm, a, b, curve) {
+    var samples = E.bake(a.t, b.t, a.v, b.v, curve, stepTicks());
+    return {
+      nodeId: prm.nodeId, c: prm.c, p: prm.p, t0: a.t, t1: b.t,
+      tol: Math.max(2, Math.floor(state.data.timebase * 0.25)), linear: true,
+      keys: [a].concat(samples, [b])
+    };
+  }
+  function clearJob(prm, a, b) {
+    return { nodeId: prm.nodeId, c: prm.c, p: prm.p, t0: a.t, t1: b.t, tol: 2, keys: [a, b] };
+  }
+  function ensureReg(prm) {
+    var r = regGet(prm);
+    var A = getAnchors(prm);
+    if (!r) r = { anchors: [], curves: {} };
+    r.anchors = A.map(function (k) { return k.t; });
+    r.curves = r.curves || {};
+    return r;
+  }
+  function run(label, fn) {
+    if (state.busy) return;
+    state.busy = true; setStatus(label + '…');
+    return loadSelection(true).then(function () { state.regBefore = clone(reg); return fn(); }).then(function (msg) {
+      return loadSelection(true).then(function () { markSeen(); setStatus(msg || 'Done.', 'ok'); });
+    }).catch(function (e) { setStatus(e.message, 'err'); })
+      .then(function () {
+        state.busy = false;
+        if (state.pendingApply) { state.pendingApply = false; applyCurve(); }
+      });
+  }
+
+  function userStopEase() {
+    if (state.curve.type !== 'bezier') return [0.333, 0.333];
+    var ae = E.toAE(state.curve); return [ae.outInf, ae.inInf];
+  }
+  function smartMap(prm) {
+    var A = getAnchors(prm), st = userStopEase(), cs = E.smartCurves(A, st[0], st[1]), m = {};
+    for (var i = 0; i < cs.length; i++) m[A[i].t] = cs[i];
+    return m;
+  }
+
+  function anchorSig(prm) { return getAnchors(prm).map(function (k) { return k.t; }); }
+  function markSeen() { state.params.forEach(function (p) { state.seen[pkey(p)] = anchorSig(p); }); }
+
+  // Ease keyframe pairs that involve newly added keyframes (and their neighbours, whose
+  // pass-through speed may change). Pairs you eased with a preset or removed are left alone.
+  function autoEase() {
+    if (!state.auto || state.busy) { markSeen(); return; }
+    var work = [];
+    targets().forEach(function (prm) {
+      var before = state.seen[pkey(prm)], A = getAnchors(prm);
+      if (!before) return; // first time this clip is seen: don't touch existing keyframes
+      var isNew = A.map(function (k) { return before.indexOf(k.t) < 0; });
+      if (!isNew.some(Boolean)) return;
+      var r = regGet(prm) || { curves: {} }, curves = r.curves || {}, idx = [];
+      for (var i = 0; i < A.length - 1; i++) {
+        var near = isNew[i] || isNew[i + 1] || (i > 0 && isNew[i - 1]) || (i + 2 < A.length && isNew[i + 2]);
+        if (!near) continue;
+        var has = Object.prototype.hasOwnProperty.call(curves, A[i].t), c = curves[A[i].t];
+        if (has && (c === null || !c.smart)) continue;
+        idx.push(i);
+      }
+      if (idx.length) work.push({ prm: prm, idx: idx });
+    });
+    markSeen();
+    if (!work.length) return;
+    run('Auto-easing', function () {
+      var jobs = [], undo = [], count = 0;
+      work.forEach(function (w) {
+        var prm = state.params.filter(function (p) { return pkey(p) === pkey(w.prm); })[0];
+        if (!prm) return;
+        var A = getAnchors(prm), sm = smartMap(prm), r = ensureReg(prm);
+        w.idx.forEach(function (i) {
+          if (!A[i + 1]) return;
+          undo.push(snapshot(prm, A[i].t, A[i + 1].t));
+          jobs.push(bakeJob(prm, A[i], A[i + 1], sm[A[i].t]));
+          r.curves[A[i].t] = sm[A[i].t]; count++;
+        });
+        regSet(prm, r);
+      });
+      if (!jobs.length) return 'Ready.';
+      pushUndo('auto', undo);
+      return H.call('writeRanges', { jobs: jobs }).then(function () {
+        return 'Auto: smart ease added to ' + count + ' keyframe pair' + (count > 1 ? 's' : '') + '.';
+      });
+    });
+  }
+
+  function applyCurve() {
+    if (state.busy) { state.pendingApply = true; return; }
+    if (!targets().length) return setStatus('Select a clip that has 2 keyframes first.', 'err');
+    run('Applying', function () {
+      var scope = $('#scope').value, jobs = [], undo = [], count = 0, curve = clone(state.curve);
+      var smart = state.mode === 'smart';
+      targets().forEach(function (prm) {
+        var segs = segmentsFor(prm, scope);
+        if (!segs.length) return;
+        var r = ensureReg(prm), sm = smart ? smartMap(prm) : null;
+        segs.forEach(function (s) {
+          if (sm) curve = sm[s.a.t];
+          undo.push(snapshot(prm, s.a.t, s.b.t));
+          jobs.push(bakeJob(prm, s.a, s.b, curve));
+          r.curves[s.a.t] = curve;
+          count++;
+        });
+        regSet(prm, r);
+      });
+      if (!jobs.length) throw new Error(!targets().length ? 'Select a clip that has 2 keyframes first.' :
+        scope === 'checked' ? 'Tick at least 2 keys in the keyframe table.' :
+        scope === 'playhead' ? 'Move the playhead between two keyframes, then apply again.' :
+        'The chosen properties need at least 2 keyframes.');
+      pushUndo('apply', undo);
+      return H.call('writeRanges', { jobs: jobs }).then(function () {
+        var nm = smart ? 'Smart ease' : curveName(curve);
+        if (!smart && nm === 'Custom' && curve.type === 'bezier') { var ae = E.toAE(curve); nm = 'Ease ' + Math.round(ae.outInf * 100) + '% out, ' + Math.round(ae.inInf * 100) + '% in,'; }
+        return nm + ' applied to ' + count + ' keyframe pair' + (count > 1 ? 's' : '') + '.';
+      });
+    });
+  }
+
+  function unbake() {
+    run('Removing ease', function () {
+      var scope = $('#scope').value, jobs = [], undo = [];
+      targets().forEach(function (prm) {
+        var r = ensureReg(prm);
+        segmentsFor(prm, scope).forEach(function (s) {
+          undo.push(snapshot(prm, s.a.t, s.b.t));
+          jobs.push(clearJob(prm, s.a, s.b));
+          r.curves[s.a.t] = null; // removed on purpose: Auto leaves it alone
+        });
+        regSet(prm, r);
+      });
+      if (!jobs.length) throw new Error('No eased keyframe pairs to remove here.');
+      pushUndo('unbake', undo);
+      return H.call('writeRanges', { jobs: jobs }).then(function () { return 'Ease removed from ' + jobs.length + ' keyframe pair' + (jobs.length > 1 ? 's' : '') + '.'; });
+    });
+  }
+
+  function undoLast() {
+    var u = state.undo.pop();
+    if (!u) return;
+    $('#btnUndo').disabled = !state.undo.length;
+    run('Undoing', function () {
+      reg = u.reg; save(REG_KEY, reg);
+      return H.call('writeRanges', { jobs: u.jobs }).then(function () {
+        // show the ease that is on the clip again
+        var prm = targets()[0], r = prm && regGet(prm), ts = r && r.curves ? Object.keys(r.curves) : [];
+        state.curve = ts.length ? clone(r.curves[ts[0]]) : clone(E.presets[1].curve);
+        curveChanged();
+        return 'Undone.';
+      });
+    });
+  }
+
+  // Edit one anchor (value and/or time) and re-bake neighbouring eased segments.
+  // Build the write job for moving/changing one anchor; neighbouring eases are re-fitted.
+  function moveAnchorJob(prm, key, newV, newT) {
+    var A = getAnchors(prm), i = -1;
+    A.forEach(function (k, j) { if (k.t === key.t) i = j; });
+    if (i < 0) throw new Error('Keyframe not found. Click ⟳ and try again.');
+    var prev = A[i - 1], next = A[i + 1];
+    var t = newT == null ? key.t : newT;
+    if ((prev && t <= prev.t) || (next && t >= next.t)) return null; // would pass a neighbour
+    var r = ensureReg(prm);
+    var cPrev = prev ? r.curves[prev.t] : null, cThis = r.curves[key.t];
+    var startT = Math.min(prev ? prev.t : t, key.t), endT = Math.max(next ? next.t : t, key.t);
+    var undo = snapshot(prm, startT, endT);
+    var nk = { t: t, v: newV }, want = [];
+    if (prev) want = want.concat(cPrev ? bakeJob(prm, prev, nk, cPrev).keys : [prev, nk]);
+    else want.push(nk);
+    if (next) want = want.concat((cThis ? bakeJob(prm, nk, next, cThis).keys : [nk, next]).slice(1));
+    if (!cPrev && prev) prm.keys.forEach(function (k) { if (k.t > prev.t && k.t < Math.min(key.t, t)) want.push(k); });
+    if (!cThis && next) prm.keys.forEach(function (k) { if (k.t > Math.max(key.t, t) && k.t < next.t) want.push(k); });
+    want.sort(function (a, b) { return a.t - b.t; });
+    r.anchors = r.anchors.map(function (x) { return x === key.t ? t : x; });
+    if (cThis && t !== key.t) { delete r.curves[key.t]; r.curves[t] = cThis; }
+    return {
+      reg: r, undo: undo, eased: !!(cPrev || cThis),
+      job: { nodeId: prm.nodeId, c: prm.c, p: prm.p, t0: startT, t1: endT,
+        tol: Math.max(2, Math.floor(state.data.timebase * 0.25)), linear: !!(cPrev || cThis), keys: want }
+    };
+  }
+
+  function editAnchor(prm, key, newV, newT) {
+    run('Updating key', function () {
+      var m = moveAnchorJob(prm, key, newV, newT);
+      if (!m) throw new Error('A keyframe cannot move past the keyframe next to it.');
+      regSet(prm, m.reg);
+      pushUndo('edit', [m.undo]);
+      return H.call('writeRanges', { jobs: [m.job] })
+        .then(function () { return 'Keyframe updated' + (m.eased ? ' and ease re-fitted.' : '.'); });
+    });
+  }
+
+  function playheadOnClip(prm) {
+    var ph = state.data.playhead;
+    return ph >= prm.clip.start && ph <= prm.clip.end;
+  }
+
+  // Move the keyframe nearest the playhead onto the playhead (every detected property).
+  function keyToPlayhead() {
+    run('Moving keyframe', function () {
+      var jobs = [], undo = [], skipped = 0, list = targets();
+      if (!list.length) throw new Error('Select a clip that has 2 keyframes first.');
+      if (!list.some(playheadOnClip)) throw new Error('Move the playhead over the clip first.');
+      list.forEach(function (prm) {
+        var kt = keyTimeAtPlayhead(prm), A = getAnchors(prm), near = A[0];
+        A.forEach(function (k) { if (Math.abs(k.t - kt) < Math.abs(near.t - kt)) near = k; });
+        if (Math.abs(near.t - kt) < state.data.timebase / 2) return; // already there
+        var m = moveAnchorJob(prm, near, near.v, kt);
+        if (!m) { skipped++; return; }
+        regSet(prm, m.reg); undo.push(m.undo); jobs.push(m.job);
+      });
+      if (!jobs.length) throw new Error(skipped ? 'The playhead is past the next keyframe. Move it closer to the keyframe you want to move.'
+        : 'The keyframe is already on the playhead.');
+      pushUndo('move', undo);
+      return H.call('writeRanges', { jobs: jobs }).then(function () { return 'Keyframe moved to the playhead.'; });
+    });
+  }
+
+  // Slide the whole animation so its first keyframe starts at the playhead (timing kept).
+  function startAtPlayhead() {
+    run('Moving animation', function () {
+      var list = targets();
+      if (!list.length) throw new Error('Select a clip that has 2 keyframes first.');
+      if (!list.some(playheadOnClip)) throw new Error('Move the playhead over the clip first.');
+      // one shared offset keeps the properties in sync with each other
+      var firstSeq = Math.min.apply(null, list.map(function (p) { return getAnchors(p)[0].t - p.clip.inPoint + p.clip.start; }));
+      var delta = state.data.playhead - firstSeq;
+      if (Math.abs(delta) < state.data.timebase / 2) throw new Error('The animation already starts at the playhead.');
+      var jobs = [], undo = [];
+      list.forEach(function (prm) {
+        var first = prm.keys[0].t, last = prm.keys[prm.keys.length - 1].t;
+        var lo = Math.min(first, first + delta), hi = Math.max(last, last + delta);
+        undo.push(snapshot(prm, lo, hi));
+        jobs.push({ nodeId: prm.nodeId, c: prm.c, p: prm.p, t0: lo, t1: hi, tol: 2, linear: true,
+          keys: prm.keys.map(function (k) { return { t: k.t + delta, v: k.v }; }) });
+        var r = ensureReg(prm), curves = {};
+        Object.keys(r.curves).forEach(function (t) { curves[Number(t) + delta] = r.curves[t]; });
+        r.anchors = r.anchors.map(function (t) { return t + delta; }); r.curves = curves;
+        regSet(prm, r);
+      });
+      pushUndo('shift', undo);
+      return H.call('writeRanges', { jobs: jobs }).then(function () { return 'Animation now starts at the playhead.'; });
+    });
+  }
+
+  function addKeyAtPlayhead() {
+    var prm = focusParam();
+    if (!prm) return setStatus('Focus a property first.', 'err');
+    run('Adding key', function () {
+      var t = keyTimeAtPlayhead(prm);
+      var A = getAnchors(prm);
+      if (A.some(function (k) { return Math.abs(k.t - t) < state.data.timebase / 2; })) throw new Error('A key already exists at the playhead.');
+      return H.call('valueAt', { nodeId: prm.nodeId, c: prm.c, p: prm.p, t: t }).then(function (res) {
+        var nk = { t: t, v: res.v };
+        var r = ensureReg(prm), prev = null, next = null;
+        A.forEach(function (k) { if (k.t < t) prev = k; else if (!next && k.t > t) next = k; });
+        var c = prev ? r.curves[prev.t] : null;
+        var jobs, undo;
+        if (prev && next && c) {
+          undo = [snapshot(prm, prev.t, next.t)];
+          var left = bakeJob(prm, prev, nk, c).keys, right = bakeJob(prm, nk, next, c).keys;
+          jobs = [{ nodeId: prm.nodeId, c: prm.c, p: prm.p, t0: prev.t, t1: next.t, linear: true,
+            tol: Math.max(2, Math.floor(state.data.timebase * 0.25)), keys: left.concat(right.slice(1)) }];
+          r.curves[t] = c;
+        } else {
+          undo = [snapshot(prm, t, t)];
+          jobs = [{ nodeId: prm.nodeId, c: prm.c, p: prm.p, t0: t, t1: t, tol: 2, keys: [nk] }];
+        }
+        r.anchors.push(t); r.anchors.sort(function (a, b) { return a - b; });
+        regSet(prm, r);
+        pushUndo('add', undo);
+        return H.call('writeRanges', { jobs: jobs }).then(function () { return 'Key added at playhead.'; });
+      });
+    });
+  }
+
+  function deleteChecked() {
+    var prm = focusParam();
+    if (!prm) return;
+    var A = getAnchors(prm);
+    var del = A.filter(function (k) { return state.checkedKeys[pkey(prm) + '|' + k.t]; });
+    if (!del.length) return setStatus('Check the keys to delete.', 'err');
+    if (A.length - del.length < 1) return setStatus('At least one key must remain.', 'err');
+    run('Deleting keys', function () {
+      var r = ensureReg(prm), delSet = {};
+      del.forEach(function (k) { delSet[k.t] = 1; delete r.curves[k.t]; });
+      var keep = A.filter(function (k) { return !delSet[k.t]; });
+      var lo = A[0].t, hi = A[A.length - 1].t;
+      var undo = [snapshot(prm, lo, hi)];
+      // rebuild: kept anchors, segments whose curve survives are re-baked
+      var want = [];
+      keep.forEach(function (k, i) {
+        if (i === 0) want.push(k);
+        var nx = keep[i + 1];
+        if (!nx) return;
+        var c = r.curves[k.t];
+        var seg = c ? bakeJob(prm, k, nx, c).keys.slice(1) : [nx];
+        want = want.concat(seg);
+      });
+      r.anchors = keep.map(function (k) { return k.t; });
+      regSet(prm, r);
+      del.forEach(function (k) { delete state.checkedKeys[pkey(prm) + '|' + k.t]; });
+      pushUndo('delete', undo);
+      return H.call('writeRanges', { jobs: [{ nodeId: prm.nodeId, c: prm.c, p: prm.p, t0: lo, t1: hi,
+        tol: Math.max(2, Math.floor(state.data.timebase * 0.25)), linear: true, keys: want }] })
+        .then(function () { return 'Deleted ' + del.length + ' key' + (del.length > 1 ? 's' : '') + '.'; });
+    });
+  }
+
+  /* ---------------- render: params ---------------- */
+  function renderParams() {
+    var el = $('#detected'), sel = $('#tableParam');
+    var found = targets();
+    if (!found.length) {
+      el.className = 'detected none';
+      el.textContent = 'Add 2 keyframes on a clip (for example Position), then select the clip in the timeline.';
+      sel.innerHTML = '';
+      return;
+    }
+    el.className = 'detected';
+    var multiClip = state.data.clips.length > 1;
+    el.innerHTML = 'Found ' + found.map(function (p) {
+      return '<b>' + esc(p.name) + '</b>' + (multiClip ? ' on ' + esc(p.clipName) : '') +
+        ' (' + getAnchors(p).length + ' keyframes)';
+    }).join(', ');
+    sel.innerHTML = state.params.map(function (p) {
+      return '<option value="' + esc(pkey(p)) + '"' + (pkey(p) === state.focusKey ? ' selected' : '') + '>' +
+        esc(p.name) + (multiClip ? ' (' + esc(p.clipName) + ')' : '') + '</option>';
+    }).join('');
+  }
+  function esc(s) { return String(s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
+
+  $('#tableParam').addEventListener('change', function () {
+    state.focusKey = this.value; renderTable(); realSpeedHint();
+  });
+
+  /* ---------------- render: key table ---------------- */
+  function renderTable() {
+    var prm = focusParam(), el = $('#keyTable');
+    if (!prm) { el.innerHTML = '<div class="empty">No property selected.</div>'; return; }
+    
+    var A = getAnchors(prm), at = {};
+    A.forEach(function (k) { at[k.t] = 1; });
+    var r = regGet(prm) || { curves: {} };
+    var rows = $('#showBaked').checked ? prm.keys : A;
+    var dims = typeof prm.keys[0].v === 'number' ? ['Value'] : (prm.keys[0].v.length === 2 ? ['X', 'Y'] : prm.keys[0].v.map(function (_, i) { return 'V' + (i + 1); }));
+    var h = '<table><tr><th></th><th>Time</th>' + dims.map(function (d) { return '<th>' + d + '</th>'; }).join('') + '<th>Ease to next key</th></tr>';
+    rows.forEach(function (k) {
+      var anchor = !!at[k.t], vals = toDisp(prm, k.v), id = pkey(prm) + '|' + k.t;
+      h += '<tr class="' + (anchor ? '' : 'baked') + '" data-t="' + k.t + '">' +
+        '<td>' + (anchor ? '<input type="checkbox" data-kc="' + id + '"' + (state.checkedKeys[id] ? ' checked' : '') + '>' : '') + '</td>' +
+        '<td><input class="tc" type="text" data-tc value="' + tc(prm, k.t) + '"' + (anchor ? '' : ' disabled') + '></td>' +
+        vals.map(function (v, i) { return '<td><input type="text" data-dim="' + i + '" value="' + fmt(v) + '"' + (anchor ? '' : ' disabled') + '></td>'; }).join('') +
+        '<td class="ease-cell">' + (anchor && r.curves && r.curves[k.t] ? esc(curveName(r.curves[k.t])) : '') + '</td></tr>';
+    });
+    el.innerHTML = h + '</table>';
+  }
+  $('#showBaked').addEventListener('change', renderTable);
+  $('#keyTable').addEventListener('change', function (e) {
+    var prm = focusParam(); if (!prm) return;
+    var kc = e.target.getAttribute('data-kc');
+    if (kc) { state.checkedKeys[kc] = e.target.checked; return; }
+    var tr = e.target.closest('tr'); if (!tr) return;
+    var t = Number(tr.getAttribute('data-t'));
+    var key = prm.keys.filter(function (k) { return k.t === t; })[0]; if (!key) return;
+    if (e.target.hasAttribute('data-tc')) {
+      var nt = parseTc(prm, e.target.value);
+      if (nt == null) { setStatus('Use timecode like 00:00:01:05 or a frame number.', 'err'); renderTable(); return; }
+      if (nt !== key.t) editAnchor(prm, key, key.v, nt);
+      return;
+    }
+    var vals = [].map.call(tr.querySelectorAll('input[data-dim]'), function (inp) { return Number(inp.value); });
+    if (vals.some(isNaN)) { setStatus('Enter numbers only.', 'err'); renderTable(); return; }
+    var cur = toDisp(prm, key.v);
+    if (vals.every(function (v, i) { return Math.abs(v - cur[i]) < 0.005; })) return;
+    editAnchor(prm, key, fromDisp(prm, vals, key.v), null);
+  });
+
+  /* ---------------- presets ---------------- */
+  function customPresets() { return load('easegraph.presets', []); }
+  function presetIcon(curve) {
+    var f = E.compile(curve), pts = [], lo = 0, hi = 1, i, y;
+    for (i = 0; i <= 30; i++) { y = f(i / 30); pts.push(y); lo = Math.min(lo, y); hi = Math.max(hi, y); }
+    var path = pts.map(function (v, j) {
+      return (j ? 'L' : 'M') + (2 + j / 30 * 40).toFixed(1) + ' ' + (28 - (v - lo) / (hi - lo) * 26).toFixed(1);
+    }).join(' ');
+    return '<svg viewBox="0 0 44 30"><path d="' + path + '" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>';
+  }
+  // Main presets never overshoot your keyframe values
+  var MAIN = ['easy', 'smooth', 'out', 'in', 'expo', 'quint', 'linear'];
+  var builtIn = E.presets.filter(function (p) { return MAIN.indexOf(p.id) >= 0; });
+  function allPresets() { return builtIn.concat(customPresets().map(function (p) { p.custom = true; return p; })); }
+  function setMode(m) { state.mode = m; save('easegraph.mode', m); }
+  function renderPresets() {
+    var smart = state.mode === 'smart';
+    var html = '<button class="preset smart" data-i="smart" aria-pressed="' + smart + '" title="Reads your motion: soft at starts and stops, keeps moving through middle keys">' +
+      '<svg viewBox="0 0 44 30" aria-hidden="true"><path d="M2 28 C14 28 14 15 22 15 S30 2 42 2" fill="none" stroke="currentColor" stroke-width="1.6"/>' +
+      '<circle cx="22" cy="15" r="2.4" fill="currentColor"/></svg><span>Smart</span></button>';
+    allPresets().forEach(function (p, i) {
+      html += '<button class="preset' + (p.custom ? ' custom' : '') + '" data-i="' + i + '" aria-pressed="' + (!smart && E.sameCurve(p.curve, state.curve)) + '"' +
+        (p.custom ? ' title="Right-click to delete"' : '') + '>' + presetIcon(p.curve) + '<span>' + esc(p.name) + '</span></button>';
+    });
+    $('#presets').innerHTML = html;
+  }
+  $('#presets').addEventListener('click', function (e) {
+    var b = e.target.closest('.preset'); if (!b) return;
+    if (b.getAttribute('data-i') === 'smart') {
+      setMode('smart');
+      if (state.curve.type !== 'bezier') state.curve = clone(E.presets[1].curve);
+    } else {
+      setMode('curve');
+      state.curve = clone(allPresets()[Number(b.getAttribute('data-i'))].curve);
+    }
+    curveChanged();
+    applyCurve();
+  });
+  $('#presets').addEventListener('contextmenu', function (e) {
+    var b = e.target.closest('.preset.custom'); if (!b) return;
+    e.preventDefault();
+    var idx = Number(b.getAttribute('data-i')) - builtIn.length, list = customPresets();
+    var name = list[idx] && list[idx].name;
+    list.splice(idx, 1); save('easegraph.presets', list); renderPresets();
+    setStatus('Deleted preset “' + name + '”.');
+  });
+  $('#btnSavePreset').addEventListener('click', function () {
+    var list = customPresets();
+    list.push({ name: 'My ' + (list.length + 1), curve: clone(state.curve) });
+    save('easegraph.presets', list); renderPresets();
+    setStatus('Saved as preset “My ' + list.length + '”.', 'ok');
+  });
+
+  /* ---------------- curve controls ---------------- */
+  function curveChanged(skipInputs) {
+    var c = state.curve, bez = c.type === 'bezier';
+    if (!skipInputs) {
+      $('#bezText').value = bez ? c.p.map(function (v) { return (Math.round(v * 1000) / 1000); }).join(', ') : curveName(c) + ' (preset curve)';
+      if (!bez) { $('#outInf').value = ''; $('#inInf').value = ''; }
+      if (bez) {
+        var ae = E.toAE(c);
+        $('#outInf').value = Math.round(ae.outInf * 100); $('#inInf').value = Math.round(ae.inInf * 100);
+        $('#outSpd').value = fmt(ae.outSpd); $('#inSpd').value = fmt(ae.inSpd);
+      }
+    }
+    renderPresets(); drawAll(); realSpeedHint();
+  }
+  function aeInputsChanged() {
+    var v = function (id) { return Number($('#' + id).value); };
+    if ([v('outInf'), v('inInf')].some(isNaN)) return;
+    if (isNaN(v('outSpd'))) $('#outSpd').value = 0;
+    if (isNaN(v('inSpd'))) $('#inSpd').value = 0;
+    state.curve = E.fromAE(v('outInf') / 100, v('outSpd'), v('inInf') / 100, v('inSpd'));
+    curveChanged(true);
+    $('#bezText').value = state.curve.p.map(function (x) { return Math.round(x * 1000) / 1000; }).join(', ');
+  }
+  ['outInf', 'outSpd', 'inInf', 'inSpd'].forEach(function (id) {
+    $('#' + id).addEventListener('input', aeInputsChanged);
+    $('#' + id).addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') { e.preventDefault(); aeInputsChanged(); applyCurve(); }
+    });
+  });
+  $('#bezText').addEventListener('change', function () {
+    var nums = ($('#bezText').value.match(/-?\d*\.?\d+/g) || []).map(Number);
+    if (nums.length !== 4) { setStatus('Enter 4 numbers: x1, y1, x2, y2', 'err'); curveChanged(); return; }
+    setMode('curve');
+    state.curve = { type: 'bezier', p: [E.clamp(nums[0], 0, 1), nums[1], E.clamp(nums[2], 0, 1), nums[3]] };
+    curveChanged();
+    applyCurve();
+  });
+  function realSpeedHint() {
+    var prm = focusParam(), el = $('#realSpeed');
+    if (!prm || state.curve.type !== 'bezier' || typeof prm.keys[0].v !== 'number') { el.textContent = ''; return; }
+    var s = segmentsFor(prm, 'all')[0]; if (!s) { el.textContent = ''; return; }
+    var avg = Math.abs(s.b.v - s.a.v) / ((s.b.t - s.a.t) / TPS), ae = E.toAE(state.curve);
+    el.textContent = prm.name + ' (first segment): out ' + fmt(ae.outSpd * avg) + '/s · in ' + fmt(ae.inSpd * avg) + '/s · average ' + fmt(avg) + '/s';
+  }
+
+  /* ---------------- graphs ---------------- */
+  var cvV = $('#cvValue'), cvS = $('#cvSpeed'), PAD = 22, drag = null;
+
+  function prep(cv) {
+    var r = cv.getBoundingClientRect(), d = window.devicePixelRatio || 1;
+    cv.width = Math.max(1, r.width * d); cv.height = Math.max(1, r.height * d);
+    var ctx = cv.getContext('2d'); ctx.setTransform(d, 0, 0, d, 0, 0);
+    return { ctx: ctx, w: r.width, h: r.height };
+  }
+  function grid(g) {
+    var ctx = g.ctx; ctx.strokeStyle = '#2a2a2a'; ctx.lineWidth = 1;
+    for (var i = 0; i <= 4; i++) {
+      var x = PAD + i / 4 * (g.w - 2 * PAD) + .5;
+      ctx.beginPath(); ctx.moveTo(x, 6); ctx.lineTo(x, g.h - 6); ctx.stroke();
+    }
+  }
+  function valueRange() {
+    var f = E.compile(state.curve), lo = 0, hi = 1;
+    for (var i = 0; i <= 100; i++) { var y = f(i / 100); lo = Math.min(lo, y); hi = Math.max(hi, y); }
+    if (state.curve.type === 'bezier') { var p = state.curve.p; lo = Math.min(lo, p[1], p[3]); hi = Math.max(hi, p[1], p[3]); }
+    var m = (hi - lo) * 0.08; return [lo - m, hi + m];
+  }
+  function speedRange() {
+    var s = E.speedFn(state.curve), lo = 0, hi = 1;
+    for (var i = 0; i <= 120; i++) { var v = s(i / 120); lo = Math.min(lo, v); hi = Math.max(hi, v); }
+    if (state.curve.type === 'bezier') { var ae = E.toAE(state.curve); hi = Math.max(hi, ae.outSpd, ae.inSpd); lo = Math.min(lo, ae.outSpd, ae.inSpd); }
+    hi = Math.min(hi, 30); lo = Math.max(lo, -30);
+    var m = (hi - lo) * 0.12; return [lo - m * .3, hi + m];
+  }
+  function mapper(g, range) {
+    return {
+      x: function (x) { return PAD + x * (g.w - 2 * PAD); },
+      y: function (y) { return g.h - PAD + 4 - (y - range[0]) / (range[1] - range[0]) * (g.h - 2 * PAD + 4); },
+      ix: function (px) { return (px - PAD) / (g.w - 2 * PAD); },
+      iy: function (py) { return range[0] + (g.h - PAD + 4 - py) / (g.h - 2 * PAD + 4) * (range[1] - range[0]); }
+    };
+  }
+  function handle(ctx, x, y, color) {
+    ctx.fillStyle = '#1b1b1b'; ctx.strokeStyle = color; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(x, y, 5.5, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+  }
+  function hline(ctx, g, m, y, label) {
+    ctx.strokeStyle = '#3a3a3a'; ctx.setLineDash([3, 4]); ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(PAD, m.y(y) + .5); ctx.lineTo(g.w - PAD, m.y(y) + .5); ctx.stroke(); ctx.setLineDash([]);
+    if (label) { ctx.fillStyle = '#777'; ctx.font = '10px sans-serif'; ctx.fillText(label, g.w - PAD - ctx.measureText(label).width, m.y(y) - 3); }
+  }
+  function focusLabels() {
+    var prm = focusParam(); if (!prm) return null;
+    var s = segmentsFor(prm, 'all')[0]; if (!s) return null;
+    var f = function (v) { return toDisp(prm, v).map(fmt).join(', '); };
+    return [f(s.a.v), f(s.b.v)];
+  }
+
+  function drawValue() {
+    var g = prep(cvV), ctx = g.ctx, R = valueRange(), m = mapper(g, R), f = E.compile(state.curve);
+    hline(ctx, g, m, 0); hline(ctx, g, m, 1);
+    ctx.strokeStyle = '#4d9df8'; ctx.lineWidth = 2; ctx.beginPath();
+    for (var i = 0; i <= 160; i++) { var x = i / 160; i ? ctx.lineTo(m.x(x), m.y(f(x))) : ctx.moveTo(m.x(x), m.y(f(x))); }
+    ctx.stroke();
+    if (state.curve.type === 'bezier') {
+      var p = state.curve.p;
+      ctx.strokeStyle = '#f2a43a'; ctx.lineWidth = 1.2;
+      ctx.beginPath(); ctx.moveTo(m.x(0), m.y(0)); ctx.lineTo(m.x(p[0]), m.y(p[1])); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(m.x(1), m.y(1)); ctx.lineTo(m.x(p[2]), m.y(p[3])); ctx.stroke();
+      handle(ctx, m.x(p[0]), m.y(p[1]), '#f2a43a'); handle(ctx, m.x(p[2]), m.y(p[3]), '#f2a43a');
+    }
+    keySquare(ctx, m.x(0), m.y(0)); keySquare(ctx, m.x(1), m.y(1));
+    if (state.progress != null) {
+      var px = state.progress;
+      ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(m.x(px), m.y(f(px)), 4, 0, Math.PI * 2); ctx.fill();
+    }
+    cvV._m = m;
+  }
+  function keySquare(ctx, x, y) {
+    ctx.fillStyle = '#d4d4d4'; ctx.save(); ctx.translate(x, y); ctx.rotate(Math.PI / 4);
+    ctx.fillRect(-3.5, -3.5, 7, 7); ctx.restore();
+  }
+  function drawSpeed() {
+    var g = prep(cvS), ctx = g.ctx, R = speedRange(), m = mapper(g, R), s = E.speedFn(state.curve);
+    hline(ctx, g, m, 0);
+    ctx.strokeStyle = '#4caf7d'; ctx.lineWidth = 2; ctx.beginPath();
+    for (var i = 0; i <= 160; i++) {
+      var x = i / 160, y = Math.max(R[0], Math.min(R[1], s(x)));
+      i ? ctx.lineTo(m.x(x), m.y(y)) : ctx.moveTo(m.x(x), m.y(y));
+    }
+    ctx.stroke();
+    if (state.curve.type === 'bezier') {
+      var ae = E.toAE(state.curve);
+      ctx.strokeStyle = '#f2a43a'; ctx.lineWidth = 1.2;
+      ctx.beginPath(); ctx.moveTo(m.x(0), m.y(ae.outSpd)); ctx.lineTo(m.x(ae.outInf), m.y(ae.outSpd)); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(m.x(1), m.y(ae.inSpd)); ctx.lineTo(m.x(1 - ae.inInf), m.y(ae.inSpd)); ctx.stroke();
+      handle(ctx, m.x(ae.outInf), m.y(ae.outSpd), '#f2a43a'); handle(ctx, m.x(1 - ae.inInf), m.y(ae.inSpd), '#f2a43a');
+      keySquare(ctx, m.x(0), m.y(ae.outSpd)); keySquare(ctx, m.x(1), m.y(ae.inSpd));
+    }
+    cvS._m = m;
+  }
+  function drawAll() {
+    drawValue();
+    if ($('#more').open) drawSpeed();
+  }
+
+  function localPt(cv, e) { var r = cv.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; }
+  function hit(px, py, x, y) { return Math.hypot(px - x, py - y) < 16; }
+
+  cvV.addEventListener('pointerdown', function (e) {
+    if (state.curve.type !== 'bezier') return setStatus('Preset curve — pick a bezier preset to edit handles.');
+    var m = cvV._m, q = localPt(cvV, e), p = state.curve.p;
+    var d1 = Math.hypot(q.x - m.x(p[0]), q.y - m.y(p[1])), d2 = Math.hypot(q.x - m.x(p[2]), q.y - m.y(p[3]));
+    if (Math.min(d1, d2) > 18) return;
+    drag = { cv: cvV, which: d1 <= d2 ? 1 : 2, m: m };
+    cvV.setPointerCapture(e.pointerId);
+  });
+  cvS.addEventListener('pointerdown', function (e) {
+    if (state.curve.type !== 'bezier') return setStatus('Preset curve — pick a bezier preset to edit handles.');
+    var m = cvS._m, q = localPt(cvS, e), ae = E.toAE(state.curve);
+    var h1 = hit(q.x, q.y, m.x(ae.outInf), m.y(ae.outSpd)), h2 = hit(q.x, q.y, m.x(1 - ae.inInf), m.y(ae.inSpd));
+    if (!h1 && !h2) return;
+    drag = { cv: cvS, which: h1 ? 1 : 2, m: m };
+    cvS.setPointerCapture(e.pointerId);
+  });
+  function onMove(e) {
+    if (!drag) return;
+    var q = localPt(drag.cv, e), x = drag.m.ix(q.x), y = drag.m.iy(q.y), p = state.curve.p.slice();
+    if (drag.cv === cvV) {
+      if (drag.which === 1) { p[0] = E.clamp(x, 0, 1); p[1] = y; } else { p[2] = E.clamp(x, 0, 1); p[3] = y; }
+      state.curve = { type: 'bezier', p: p }; setMode('curve');
+    } else {
+      var ae = E.toAE(state.curve);
+      if (drag.which === 1) { ae.outInf = E.clamp(x, 0.01, 1); ae.outSpd = y; }
+      else { ae.inInf = E.clamp(1 - x, 0.01, 1); ae.inSpd = y; }
+      state.curve = E.fromAE(ae.outInf, ae.outSpd, ae.inInf, ae.inSpd); setMode('curve');
+    }
+    curveChanged();
+    drag.m = drag.cv._m; // follow the rescaled graph
+  }
+  cvV.addEventListener('pointermove', onMove); cvS.addEventListener('pointermove', onMove);
+  ['pointerup', 'pointercancel'].forEach(function (ev) {
+    var end = function () { if (drag) { drag = null; applyCurve(); } };
+    cvV.addEventListener(ev, end); cvS.addEventListener(ev, end);
+  });
+
+  $('#more').addEventListener('toggle', drawAll);
+  window.addEventListener('resize', drawAll);
+
+  /* ---------------- motion preview ---------------- */
+  (function anim() {
+    // A dot travels along the curve so you can see the timing
+    var start = performance.now(), last = 0;
+    var still = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)');
+    function frame(now) {
+      requestAnimationFrame(frame);
+      if ((still && still.matches) || document.hidden || drag || now - last < 33) return;
+      last = now;
+      var t = ((now - start) % 2200) / 1600;
+      state.progress = t >= 1 ? 1 : t;
+      drawValue();
+    }
+    requestAnimationFrame(frame);
+  })();
+
+  /* ---------------- wire buttons ---------------- */
+  $('#btnRefresh').addEventListener('click', function () { loadSelection(false); });
+  $('#btnUnbake').addEventListener('click', unbake);
+  $('#btnKeyPH').addEventListener('click', keyToPlayhead);
+  $('#autoEase').checked = !!state.auto;
+  $('#autoEase').addEventListener('change', function () {
+    state.auto = this.checked; save('easegraph.auto', state.auto); markSeen();
+    setStatus(state.auto ? 'Auto is on: new keyframes get a smart ease by themselves.' : 'Auto is off.');
+  });
+  $('#btnStartPH').addEventListener('click', startAtPlayhead);
+  $('#btnUndo').addEventListener('click', undoLast);
+  $('#btnAddKey').addEventListener('click', addKeyAtPlayhead);
+  $('#btnDelKey').addEventListener('click', deleteChecked);
+  $('#btnUndo').disabled = true;
+
+  // Detect clip selection / new keyframes automatically (checks every 1.5 s)
+  var lastSig = null;
+  setInterval(function () {
+    if (state.busy || document.hidden || drag || (window.__egQuiet && window.__egQuiet())) return;
+    H.call('selSignature').then(function (sig) {
+      if (lastSig !== null && sig !== lastSig) loadSelection(true).then(autoEase);
+      lastSig = sig;
+    }).catch(function () {});
+  }, 1500);
+
+  // Reload automatically whenever you click back into the panel
+  window.addEventListener('focus', function () { if (!state.busy) loadSelection(true); });
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && e.target.tagName !== 'INPUT') { e.preventDefault(); applyCurve(); }
+  });
+
+  curveChanged();
+  loadSelection(true).then(function () {
+    markSeen();
+    H.call('selSignature').then(function (sig) { if (lastSig === null) lastSig = sig; }).catch(function () {});
+    if (!H.isPremiere) setStatus('Demo clip loaded. Tap a graph, or type a number and press Enter.');
+    else if (state.params.length) setStatus('Tap a graph, or type a number and press Enter.');
+  });
+
+  // test hooks
+  window.EaseGraphApp = { state: state, getAnchors: getAnchors, segmentsFor: segmentsFor, applyCurve: applyCurve,
+    editAnchor: editAnchor, undoLast: undoLast, unbake: unbake, focusParam: focusParam };
+})();

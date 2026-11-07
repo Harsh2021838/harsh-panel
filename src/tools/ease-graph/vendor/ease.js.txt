@@ -1,0 +1,170 @@
+/* EaseGraph — easing math (shared by panel + tests) */
+(function (root) {
+  'use strict';
+  var E = {};
+
+  function clamp(v, a, b) { return v < a ? a : v > b ? b : v; }
+  E.clamp = clamp;
+
+  // Cubic-bezier easing, like CSS / After Effects value graph. x1,x2 in [0,1].
+  E.bezierFn = function (x1, y1, x2, y2) {
+    x1 = clamp(x1, 0, 1); x2 = clamp(x2, 0, 1);
+    function sx(t) { var u = 1 - t; return 3 * u * u * t * x1 + 3 * u * t * t * x2 + t * t * t; }
+    function sy(t) { var u = 1 - t; return 3 * u * u * t * y1 + 3 * u * t * t * y2 + t * t * t; }
+    function dsx(t) { var u = 1 - t; return 3 * u * u * x1 + 6 * u * t * (x2 - x1) + 3 * t * t * (1 - x2); }
+    function solve(x) {
+      var t = x, i;
+      for (i = 0; i < 8; i++) {
+        var e = sx(t) - x;
+        if (Math.abs(e) < 1e-7) return t;
+        var d = dsx(t);
+        if (Math.abs(d) < 1e-6) break;
+        t -= e / d;
+      }
+      var lo = 0, hi = 1; t = x;
+      for (i = 0; i < 60; i++) {
+        var v = sx(t);
+        if (Math.abs(v - x) < 1e-7) break;
+        if (v < x) lo = t; else hi = t;
+        t = (lo + hi) / 2;
+      }
+      return t;
+    }
+    return function (x) {
+      if (x <= 0) return 0;
+      if (x >= 1) return 1;
+      return sy(solve(x));
+    };
+  };
+
+  // Non-bezier curves (graph handles disabled for these)
+  E.fns = {
+    elasticOut: function (x) {
+      if (x <= 0) return 0; if (x >= 1) return 1;
+      return Math.pow(2, -10 * x) * Math.sin((x * 10 - 0.75) * (2 * Math.PI / 3)) + 1;
+    },
+    bounceOut: function (x) {
+      var n = 7.5625, d = 2.75;
+      if (x < 1 / d) return n * x * x;
+      if (x < 2 / d) { x -= 1.5 / d; return n * x * x + 0.75; }
+      if (x < 2.5 / d) { x -= 2.25 / d; return n * x * x + 0.9375; }
+      x -= 2.625 / d; return n * x * x + 0.984375;
+    }
+  };
+
+  // curve = {type:'bezier', p:[x1,y1,x2,y2]} | {type:'fn', name:'elasticOut'}
+  E.compile = function (curve) {
+    if (curve && curve.type === 'fn' && E.fns[curve.name]) return E.fns[curve.name];
+    var p = (curve && curve.p) || [0, 0, 1, 1];
+    return E.bezierFn(p[0], p[1], p[2], p[3]);
+  };
+
+  E.evaluate = function (curve, x) { return E.compile(curve)(x); };
+
+  // Normalized speed (1 = average speed of the segment)
+  E.speedFn = function (curve) {
+    var f = E.compile(curve), h = 1e-4;
+    return function (x) {
+      var a = clamp(x - h, 0, 1), b = clamp(x + h, 0, 1);
+      return (f(b) - f(a)) / (b - a);
+    };
+  };
+
+  // After Effects style influence (0..1) / speed (1 = average) <-> bezier
+  E.fromAE = function (outInf, outSpd, inInf, inSpd) {
+    outInf = clamp(outInf, 0.001, 1); inInf = clamp(inInf, 0.001, 1);
+    return { type: 'bezier', p: [outInf, outSpd * outInf, 1 - inInf, 1 - inSpd * inInf] };
+  };
+  E.toAE = function (curve) {
+    var p = curve.p, outInf = p[0], inInf = 1 - p[2];
+    return {
+      outInf: outInf, outSpd: outInf > 0 ? p[1] / outInf : 0,
+      inInf: inInf, inSpd: inInf > 0 ? (1 - p[3]) / inInf : 0
+    };
+  };
+
+  function lerpVal(a, b, k) {
+    if (typeof a === 'number') return a + (b - a) * k;
+    var out = [];
+    for (var i = 0; i < a.length; i++) out.push(a[i] + (b[i] - a[i]) * k);
+    return out;
+  }
+  E.lerpVal = lerpVal;
+
+  // Interior samples between two keys (endpoints NOT included). Times in ticks.
+  // Every dimension uses the SAME eased progress, so a straight move stays straight
+  // and nothing else (scale, rotation, other params) is touched.
+  E.bake = function (t0, t1, v0, v1, curve, stepTicks) {
+    var f = E.compile(curve), out = [], dur = t1 - t0;
+    if (!(dur > 0) || !(stepTicks > 0)) return out;
+    for (var k = 1; ; k++) {
+      var t = t0 + k * stepTicks;
+      if (t > t1 - stepTicks * 0.5) break;
+      out.push({ t: Math.round(t), v: lerpVal(v0, v1, f((t - t0) / dur)) });
+    }
+    return out;
+  };
+
+  /* Smart ease: one curve per keyframe pair, decided by the motion itself.
+     - Where the motion starts, stops, reverses or turns sharply: speed 0 (soft ease, user's %).
+     - Where it passes through a key in the same direction: keep moving (no stop in the middle).
+     - Speeds are capped so the curve never overshoots the keyframe values.
+     anchors = [{t (ticks), v (number|array)}]; returns curves[i] for pair i -> i+1 */
+  function diff(a, b) {
+    if (typeof a === 'number') return [b - a];
+    var d = []; for (var i = 0; i < a.length; i++) d.push(b[i] - a[i]); return d;
+  }
+  function len(d) { var s = 0; for (var i = 0; i < d.length; i++) s += d[i] * d[i]; return Math.sqrt(s); }
+  function dot(a, b) { var s = 0; for (var i = 0; i < a.length; i++) s += a[i] * b[i]; return s; }
+  E.smartCurves = function (anchors, outInf, inInf) {
+    var n = anchors.length, segs = [], vel = [], curves = [], i;
+    outInf = outInf || 0.333; inInf = inInf || 0.333;
+    for (i = 0; i < n - 1; i++) {
+      var d = diff(anchors[i].v, anchors[i + 1].v), dur = (anchors[i + 1].t - anchors[i].t) || 1, L = len(d);
+      segs.push({ d: d, L: L, avg: L / dur });
+    }
+    for (i = 0; i < n; i++) {
+      if (i === 0 || i === n - 1) { vel.push(0); continue; }
+      var a = segs[i - 1], b = segs[i];
+      if (!a.L || !b.L) { vel.push(0); continue; }
+      var cos = dot(a.d, b.d) / (a.L * b.L);
+      if (cos < 0.5) { vel.push(0); continue; } // reverses or turns sharply -> stop there
+      vel.push(2 * a.avg * b.avg / (a.avg + b.avg) * cos); // harmonic mean: gentle, no surge
+    }
+    var CAP = 2.5; // with ~33% influence this keeps the curve inside the keyframe values
+    for (i = 0; i < n - 1; i++) {
+      var s = segs[i];
+      if (!s.L) { curves.push({ type: 'bezier', p: [0, 0, 1, 1], smart: true }); continue; }
+      var so = clamp(vel[i] / s.avg, 0, CAP), si = clamp(vel[i + 1] / s.avg, 0, CAP);
+      var c = E.fromAE(so > 0 ? 0.333 : outInf, so, si > 0 ? 0.333 : inInf, si);
+      c.smart = true;
+      curves.push(c);
+    }
+    return curves;
+  };
+
+  E.presets = [
+    { id: 'linear', name: 'Linear', curve: { type: 'bezier', p: [0, 0, 1, 1] } },
+    { id: 'easy', name: 'Easy Ease', curve: { type: 'bezier', p: [0.333, 0, 0.667, 1] } },
+    { id: 'in', name: 'Ease In', curve: { type: 'bezier', p: [0.42, 0, 1, 1] } },
+    { id: 'out', name: 'Ease Out', curve: { type: 'bezier', p: [0, 0, 0.58, 1] } },
+    { id: 'smooth', name: 'Smooth', curve: { type: 'bezier', p: [0.65, 0, 0.35, 1] } },
+    { id: 'expo', name: 'Expo', curve: { type: 'bezier', p: [0.87, 0, 0.13, 1] } },
+    { id: 'quint', name: 'Quint Out', curve: { type: 'bezier', p: [0.22, 1, 0.36, 1] } },
+    { id: 'snap', name: 'Snap', curve: { type: 'bezier', p: [0.05, 0.9, 0.1, 1] } },
+    { id: 'back', name: 'Back Out', curve: { type: 'bezier', p: [0.34, 1.56, 0.64, 1] } },
+    { id: 'backio', name: 'Back In-Out', curve: { type: 'bezier', p: [0.68, -0.6, 0.32, 1.6] } },
+    { id: 'elastic', name: 'Elastic', curve: { type: 'fn', name: 'elasticOut' } },
+    { id: 'bounce', name: 'Bounce', curve: { type: 'fn', name: 'bounceOut' } }
+  ];
+
+  E.sameCurve = function (a, b) {
+    if (!a || !b || a.type !== b.type) return false;
+    if (a.type === 'fn') return a.name === b.name;
+    for (var i = 0; i < 4; i++) if (Math.abs(a.p[i] - b.p[i]) > 0.002) return false;
+    return true;
+  };
+
+  if (typeof module !== 'undefined' && module.exports) module.exports = E;
+  else root.Ease = E;
+})(window);
