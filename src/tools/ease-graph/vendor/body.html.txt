@@ -23,10 +23,6 @@
     <div class="kft-scroll" id="kftScroll"><div class="kft-inner" id="kftInner"></div></div>
     <div class="kft-legend"><span class="lg smooth"></span>Smooth <span class="lg linear"></span>Linear (not eased) <span class="lg sel"></span>Selected</div>
   </section>
-  <div class="how" role="radiogroup" aria-label="How to ease">
-    <button id="howClean" role="radio" title="Premiere's own ease on your keyframes. No keys are added.">Premiere ease (no extra keys)</button>
-    <button id="howExact" role="radio" title="Draws the exact curve with a key on every frame between your keyframes.">Exact curve (adds keys)</button>
-  </div>
   <div class="gwrap"><canvas id="cvValue" aria-label="Ease graph. Drag the orange handles to shape the ease."></canvas></div>
   <div class="presets" id="presets"></div>
 

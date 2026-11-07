@@ -19,7 +19,8 @@
     seen: {},                                // keyframes already known, per property
     selSegs: {},                             // keyframe pairs picked in the strip: "paramKey|t" -> true
     zoom: 1,
-    native: load('easegraph.native', true),  // true: Premiere's own ease, no extra keys
+    // Premiere's own Bezier (set by script) keeps the old speed, so it never eases: always draw the curve.
+    native: false,
     samples: {}                              // "paramKey|t" -> values Premiere really plays
   };
 
@@ -187,7 +188,7 @@
     var samples = E.bake(a.t, b.t, a.v, b.v, curve, stepTicks());
     return {
       nodeId: prm.nodeId, c: prm.c, p: prm.p, t0: a.t, t1: b.t,
-      tol: Math.max(2, Math.floor(state.data.timebase * 0.25)), linear: true,
+      tol: Math.max(2, Math.floor(state.data.timebase * 0.25)), linear: true, interp: 0,
       keys: [a].concat(samples, [b])
     };
   }
@@ -940,14 +941,6 @@
     if (!(e.ctrlKey || e.metaKey || e.altKey)) return;
     e.preventDefault(); zoomBy(e.deltaY < 0 ? 1.25 : 0.8);
   }, { passive: false });
-  function renderHow() {
-    $('#howClean').setAttribute('aria-checked', String(state.native)); $('#howClean').className = state.native ? 'on' : '';
-    $('#howExact').setAttribute('aria-checked', String(!state.native)); $('#howExact').className = !state.native ? 'on' : '';
-  }
-  $('#howClean').addEventListener('click', function () { state.native = true; save('easegraph.native', true); renderHow(); setStatus('Premiere ease: your keyframes get Premiere’s own smooth ease, no keys added.'); });
-  $('#howExact').addEventListener('click', function () { state.native = false; save('easegraph.native', false); renderHow(); setStatus('Exact curve: the chosen shape is drawn with a key on every frame in between.'); });
-  renderHow();
-
   /* ---------------- wire buttons ---------------- */
   $('#btnRefresh').addEventListener('click', function () { loadSelection(false); });
   $('#btnUnbake').addEventListener('click', unbake);
