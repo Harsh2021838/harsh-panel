@@ -147,6 +147,11 @@ FrameshiftEG.writeRanges = function (json) {
           try { prm.setInterpolationTypeAtKey(tm, 0, false); } catch (e3) {}
         }
       }
+      // 2b) Premiere's own interpolation on the two end keys (5 = Bezier, 0 = Linear)
+      if (job.interp !== undefined && job.keys.length) {
+        try { prm.setInterpolationTypeAtKey(FrameshiftEG.mkTime(job.keys[0].t), job.interp, false); } catch (e4) {}
+        try { prm.setInterpolationTypeAtKey(FrameshiftEG.mkTime(job.keys[job.keys.length - 1].t), job.interp, false); } catch (e5) {}
+      }
       // 3) refresh Premiere UI once per job
       if (job.keys.length) {
         var last = job.keys[job.keys.length - 1];
@@ -163,6 +168,23 @@ FrameshiftEG.valueAt = function (json) {
     var a = FrameshiftEG.parse(json);
     var prm = FrameshiftEG.findParam(a.nodeId, a.c, a.p);
     return FrameshiftEG.ok({ v: FrameshiftEG.readVal(prm.getValueAtTime(FrameshiftEG.mkTime(a.t))) });
+  } catch (e) { return FrameshiftEG.err(e); }
+};
+
+// What Premiere really plays between keys: n values from t0 to t1 for each job, so the panel
+// can draw the actual motion (proof that a pair is smooth, whatever made it so).
+FrameshiftEG.samples = function (json) {
+  try {
+    var spec = FrameshiftEG.parse(json), out = [], j, i;
+    for (j = 0; j < spec.jobs.length; j++) {
+      var job = spec.jobs[j], vals = [];
+      try {
+        var prm = FrameshiftEG.findParam(job.nodeId, job.c, job.p), n = job.n || 16;
+        for (i = 0; i <= n; i++) vals.push(FrameshiftEG.readVal(prm.getValueAtTime(FrameshiftEG.mkTime(job.t0 + (job.t1 - job.t0) * i / n))));
+      } catch (e1) { vals = null; }
+      out.push(vals);
+    }
+    return FrameshiftEG.ok(out);
   } catch (e) { return FrameshiftEG.err(e); }
 };
 

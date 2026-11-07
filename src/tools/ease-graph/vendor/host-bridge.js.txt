@@ -62,6 +62,13 @@
       return { written: 1 };
     },
     valueAt: function (a) { return { v: demoValueAt(findDemo(a.nodeId, a.c, a.p), a.t) }; },
+    samples: function (spec) {
+      return spec.jobs.map(function (j) {
+        var prm = findDemo(j.nodeId, j.c, j.p), out = [], n = j.n || 16;
+        for (var i = 0; i <= n; i++) out.push(demoValueAt(prm, j.t0 + (j.t1 - j.t0) * i / n));
+        return out;
+      });
+    },
     selSignature: function () {
       return demo.clips.map(function (c) { return c.nodeId + c.params.map(function (p) { return p.keys.length; }).join(','); }).join('|');
     },

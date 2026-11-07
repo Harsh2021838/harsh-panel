@@ -16,7 +16,11 @@
     busy: false,
     mode: load('easegraph.mode', 'smart'),   // 'smart' = reads the motion, 'curve' = one curve everywhere
     auto: load('easegraph.auto', true),      // auto-ease new keyframes
-    seen: {}                                 // keyframes already known, per property
+    seen: {},                                // keyframes already known, per property
+    selSegs: {},                             // keyframe pairs picked in the strip: "paramKey|t" -> true
+    zoom: 1,
+    native: load('easegraph.native', true),  // true: Premiere's own ease, no extra keys
+    samples: {}                              // "paramKey|t" -> values Premiere really plays
   };
 
   function clone(o) { return JSON.parse(JSON.stringify(o)); }
@@ -69,9 +73,12 @@
     return state.data.playhead - prm.clip.start + prm.clip.inPoint;
   }
 
+  function selCount() { return Object.keys(state.selSegs).length; }
   function segmentsFor(prm, scope) {
     var A = getAnchors(prm), segs = [];
     for (var i = 0; i < A.length - 1; i++) segs.push({ a: A[i], b: A[i + 1] });
+    // Pairs picked in the keyframe strip win over the "Apply to" setting.
+    if (selCount() && scope !== 'every') return segs.filter(function (s) { return state.selSegs[pkey(prm) + '|' + s.a.t]; });
     if (scope === 'playhead') {
       var kt = keyTimeAtPlayhead(prm);
       segs = segs.filter(function (s) { return kt >= s.a.t && kt < s.b.t; });
@@ -129,6 +136,7 @@
   }
   function curveName(c) {
     if (!c) return '';
+    if (c.type === 'native') return 'Premiere ease';
     var all = E.presets.concat(customPresets());
     var m = all.filter(function (p) { return E.sameCurve(p.curve, c); })[0];
     return m ? m.name : 'Custom';
@@ -155,7 +163,7 @@
         list.forEach(function (p) { if (p.keys.length >= 2) state.checkedParams[pkey(p)] = true; });
       }
       if (!focusParam()) state.focusKey = list.length ? pkey(list[0]) : null;
-      renderParams(); renderTable(); drawAll();
+      renderParams(); renderTable(); drawAll(); renderStrip(); fetchSamples();
       if (!quiet) {
         setStatus(list.length ? list.length + ' propert' + (list.length > 1 ? 'ies' : 'y') + ' with keyframes found.'
           : 'No keyframes on the selected clip. Add 2 keyframes in Effect Controls first.', list.length ? 'ok' : '');
@@ -250,15 +258,21 @@
         w.idx.forEach(function (i) {
           if (!A[i + 1]) return;
           undo.push(snapshot(prm, A[i].t, A[i + 1].t));
-          jobs.push(bakeJob(prm, A[i], A[i + 1], sm[A[i].t]));
-          r.curves[A[i].t] = sm[A[i].t]; count++;
+          if (state.native) {
+            jobs.push({ nodeId: prm.nodeId, c: prm.c, p: prm.p, t0: A[i].t, t1: A[i + 1].t, tol: Math.max(2, Math.floor(state.data.timebase * 0.25)), keys: [A[i], A[i + 1]], interp: 5 });
+            r.curves[A[i].t] = { type: 'native', smart: true };
+          } else {
+            jobs.push(bakeJob(prm, A[i], A[i + 1], sm[A[i].t]));
+            r.curves[A[i].t] = sm[A[i].t];
+          }
+          count++;
         });
         regSet(prm, r);
       });
       if (!jobs.length) return 'Ready.';
       pushUndo('auto', undo);
       return H.call('writeRanges', { jobs: jobs }).then(function () {
-        return 'Auto: smart ease added to ' + count + ' keyframe pair' + (count > 1 ? 's' : '') + '.';
+        return 'Auto: new keyframes eased (' + count + ' pair' + (count > 1 ? 's' : '') + '). See the strip above.';
       });
     });
   }
@@ -276,8 +290,15 @@
         segs.forEach(function (s) {
           if (sm) curve = sm[s.a.t];
           undo.push(snapshot(prm, s.a.t, s.b.t));
-          jobs.push(bakeJob(prm, s.a, s.b, curve));
-          r.curves[s.a.t] = curve;
+          if (state.native) {
+            // Premiere's own ease: just the two keys, set to Bezier (Linear stays linear)
+            var lin = curve && curve.type === 'bezier' && E.sameCurve(curve, { type: 'bezier', p: [0, 0, 1, 1] }) || curveName(curve) === 'Linear';
+            jobs.push({ nodeId: prm.nodeId, c: prm.c, p: prm.p, t0: s.a.t, t1: s.b.t, tol: Math.max(2, Math.floor(state.data.timebase * 0.25)), keys: [s.a, s.b], interp: lin ? 0 : 5 });
+            r.curves[s.a.t] = lin ? null : { type: 'native' };
+          } else {
+            jobs.push(bakeJob(prm, s.a, s.b, curve));
+            r.curves[s.a.t] = curve;
+          }
           count++;
         });
         regSet(prm, r);
@@ -288,6 +309,7 @@
         'The chosen properties need at least 2 keyframes.');
       pushUndo('apply', undo);
       return H.call('writeRanges', { jobs: jobs }).then(function () {
+        if (state.native) return 'Premiere ease set on ' + count + ' keyframe pair' + (count > 1 ? 's' : '') + '. The strip above shows the real motion.';
         var nm = smart ? 'Smart ease' : curveName(curve);
         if (!smart && nm === 'Custom' && curve.type === 'bezier') { var ae = E.toAE(curve); nm = 'Ease ' + Math.round(ae.outInf * 100) + '% out, ' + Math.round(ae.inInf * 100) + '% in,'; }
         return nm + ' applied to ' + count + ' keyframe pair' + (count > 1 ? 's' : '') + '.';
@@ -812,6 +834,119 @@
     }
     requestAnimationFrame(frame);
   })();
+
+  /* ---------------- keyframe strip ---------------- */
+  // Every keyframed property of the selected clip(s) on one zoomable strip. Each pair of keyframes is
+  // a block showing the motion Premiere really plays (sampled from Premiere), so you can see whether
+  // it's smooth. Click a block to pick it, Shift/Cmd-click to pick more; presets apply to the picks.
+  function segKey(prm, a) { return pkey(prm) + '|' + a.t; }
+  function seqT(prm, t) { return t - prm.clip.inPoint + prm.clip.start; }
+  function fetchSamples() {
+    var jobs = [], keys = [];
+    targets().forEach(function (prm) {
+      segmentsFor(prm, 'every').forEach(function (s) {
+        jobs.push({ nodeId: prm.nodeId, c: prm.c, p: prm.p, t0: s.a.t, t1: s.b.t, n: 16 });
+        keys.push(segKey(prm, s.a));
+      });
+    });
+    if (!jobs.length) return;
+    H.call('samples', { jobs: jobs.slice(0, 80) }).then(function (out) {
+      out.forEach(function (v, i) { state.samples[keys[i]] = v; });
+      renderStrip();
+    }).catch(function () {});
+  }
+  // 0..1 progress of each sample from a to b (on the dimension that moves most)
+  function progress(vals, a, b) {
+    if (!vals) return null;
+    var dim = -1, best = 0;
+    if (a.v && a.v.length) for (var d = 0; d < a.v.length; d++) { var dd = Math.abs(b.v[d] - a.v[d]); if (dd > best) { best = dd; dim = d; } }
+    var av = dim < 0 ? a.v : a.v[dim], bv = dim < 0 ? b.v : b.v[dim], span = bv - av;
+    if (!span) return null;
+    return vals.map(function (v) { var x = dim < 0 ? v : (v && v[dim]); return x == null ? null : (x - av) / span; });
+  }
+  // Smooth = starts and ends slower than the middle; linear = constant speed
+  function isEased(p) {
+    if (!p || p.length < 5 || p.some(function (x) { return x == null; })) return null;
+    var n = p.length - 1, first = Math.abs(p[1] - p[0]) * n, last = Math.abs(p[n] - p[n - 1]) * n;
+    return first < 0.7 || last < 0.7;
+  }
+  function renderStrip() {
+    var list = targets(), box = $('#kftInner'), info = $('#kftInfo');
+    $('#kft').hidden = !list.length;
+    if (!list.length) { box.innerHTML = ''; return; }
+    // drop picks whose keyframes are gone
+    var valid = {};
+    list.forEach(function (prm) { segmentsFor(prm, 'every').forEach(function (s) { valid[segKey(prm, s.a)] = 1; }); });
+    Object.keys(state.selSegs).forEach(function (k) { if (!valid[k]) delete state.selSegs[k]; });
+    var t0 = Infinity, t1 = -Infinity;
+    list.forEach(function (prm) { t0 = Math.min(t0, prm.clip.start); t1 = Math.max(t1, prm.clip.end); });
+    var A0 = Infinity, A1 = -Infinity;
+    list.forEach(function (prm) { getAnchors(prm).forEach(function (k) { A0 = Math.min(A0, seqT(prm, k.t)); A1 = Math.max(A1, seqT(prm, k.t)); }); });
+    // frame the keyframes (with a little room), not the whole clip
+    var pad = Math.max((A1 - A0) * 0.06, state.data.timebase * 4);
+    t0 = Math.max(t0, A0 - pad); t1 = Math.min(t1, A1 + pad);
+    if (!(t1 > t0)) { t0 = A0 - pad; t1 = A1 + pad; }
+    var W = Math.max(200, ($('#kftScroll').clientWidth || 300) * state.zoom);
+    var X = function (t) { return ((t - t0) / (t1 - t0) * W).toFixed(1); };
+    var multi = state.data.clips.length > 1, html = '', pairs = 0, smoothN = 0, picked = selCount();
+    list.forEach(function (prm) {
+      var A = getAnchors(prm), r = regGet(prm) || { curves: {} };
+      html += '<div class="kft-row"><div class="kft-name">' + esc(prm.name) + (multi ? ' <i>' + esc(prm.clipName) + '</i>' : '') + '</div><div class="kft-track" style="width:' + W + 'px">';
+      for (var i = 0; i < A.length - 1; i++) {
+        var a = A[i], b = A[i + 1], k = segKey(prm, a), x0 = Number(X(seqT(prm, a.t))), x1 = Number(X(seqT(prm, b.t)));
+        var p = progress(state.samples[k], a, b), eased = isEased(p);
+        var flat = a.v === b.v || (a.v && a.v.join && a.v.join() === b.v.join());
+        if (eased === null) eased = !!(r.curves && r.curves[a.t]) && !flat;
+        pairs++; if (eased || flat) smoothN++;
+        var path = '';
+        if (p && !flat) path = p.map(function (y, j) { return (j ? 'L' : 'M') + (j / (p.length - 1) * 100).toFixed(1) + ' ' + (30 - Math.max(-0.1, Math.min(1.1, y)) * 28).toFixed(1); }).join(' ');
+        else path = 'M0 ' + (flat ? 16 : 28) + ' L100 ' + (flat ? 16 : 4);
+        var cls = 'kft-seg' + (flat ? ' flat' : eased ? ' smooth' : ' linear') + (state.selSegs[k] ? ' sel' : '');
+        html += '<button class="' + cls + '" data-k="' + esc(k) + '" style="left:' + x0 + 'px;width:' + Math.max(6, x1 - x0) + 'px" title="' +
+          esc(prm.name + ': ' + tc(prm, a.t) + ' to ' + tc(prm, b.t) + (flat ? ' (no change)' : eased ? ' (smooth)' : ' (linear, not eased)')) + '">' +
+          '<svg viewBox="0 0 100 32" preserveAspectRatio="none" aria-hidden="true"><path d="' + path + '"/></svg></button>';
+      }
+      A.forEach(function (k2) { html += '<span class="kft-key" style="left:' + X(seqT(prm, k2.t)) + 'px"></span>'; });
+      html += '</div></div>';
+    });
+    var ph = state.data.playhead;
+    if (ph >= t0 && ph <= t1) html += '<span class="kft-ph" style="left:' + X(ph) + 'px"></span>';
+    box.style.width = W + 'px';
+    box.innerHTML = html;
+    var linear = pairs - smoothN;
+    info.innerHTML = '<b>' + pairs + ' keyframe pair' + (pairs === 1 ? '' : 's') + '</b>' +
+      (linear ? ', <span class="warn">' + linear + ' not eased</span>' : ', all smooth') +
+      (picked ? ', ' + picked + ' picked' : '');
+  }
+  $('#kftInner').addEventListener('click', function (e) {
+    var b = e.target.closest('.kft-seg'); if (!b) return;
+    var k = b.getAttribute('data-k');
+    if (e.shiftKey || e.metaKey || e.ctrlKey) { if (state.selSegs[k]) delete state.selSegs[k]; else state.selSegs[k] = true; }
+    else if (state.selSegs[k] && selCount() === 1) delete state.selSegs[k];
+    else { state.selSegs = {}; state.selSegs[k] = true; }
+    renderStrip();
+    setStatus(selCount() ? 'Picked ' + selCount() + ' pair' + (selCount() > 1 ? 's' : '') + '. Choose an ease below to apply it to just these.' : 'Nothing picked: eases apply to every pair.');
+  });
+  $('#kftAll').addEventListener('click', function () {
+    var all = {}, n = 0;
+    targets().forEach(function (prm) { segmentsFor(prm, 'every').forEach(function (s) { all[segKey(prm, s.a)] = true; n++; }); });
+    state.selSegs = selCount() === n ? {} : all;
+    renderStrip();
+  });
+  function zoomBy(f) { state.zoom = Math.max(1, Math.min(24, state.zoom * f)); renderStrip(); }
+  $('#kftIn').addEventListener('click', function () { zoomBy(1.6); });
+  $('#kftOut').addEventListener('click', function () { zoomBy(1 / 1.6); });
+  $('#kftScroll').addEventListener('wheel', function (e) {
+    if (!(e.ctrlKey || e.metaKey || e.altKey)) return;
+    e.preventDefault(); zoomBy(e.deltaY < 0 ? 1.25 : 0.8);
+  }, { passive: false });
+  function renderHow() {
+    $('#howClean').setAttribute('aria-checked', String(state.native)); $('#howClean').className = state.native ? 'on' : '';
+    $('#howExact').setAttribute('aria-checked', String(!state.native)); $('#howExact').className = !state.native ? 'on' : '';
+  }
+  $('#howClean').addEventListener('click', function () { state.native = true; save('easegraph.native', true); renderHow(); setStatus('Premiere ease: your keyframes get Premiere’s own smooth ease, no keys added.'); });
+  $('#howExact').addEventListener('click', function () { state.native = false; save('easegraph.native', false); renderHow(); setStatus('Exact curve: the chosen shape is drawn with a key on every frame in between.'); });
+  renderHow();
 
   /* ---------------- wire buttons ---------------- */
   $('#btnRefresh').addEventListener('click', function () { loadSelection(false); });
