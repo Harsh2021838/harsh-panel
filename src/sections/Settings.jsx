@@ -126,7 +126,7 @@ export default function Settings({ clients, active, onLibraryChanged, openGuide,
 
       <section className="block">
         <h3 className="block-title">Size of the tools</h3>
-        <p className="help">How big graphs, waveforms and buttons are in Ease Graph and Sound Kit. Small fits more in a narrow panel.</p>
+        <p className="help">Auto fits everything to the panel’s width, so nothing gets cut off. Small, Medium and Large keep one fixed size. It changes every tool: text, buttons, graphs and waveforms.</p>
         <SizePicker />
       </section>
 

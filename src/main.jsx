@@ -1,5 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
+import { startSizing } from "./density.js";
+import SizeSwitch from "./tools/SizeSwitch.jsx";
 import { hostApp, hostName, hostBackground, onThemeChange, extensionPath, host } from "./host.js";
 import { Wrench, Image, Helix, Check, Proof, Back, Chevron, Gear, Caret, Plus, Wave, GapIcon, VaultIcon, EaseIcon } from "./icons.jsx";
 import Settings from "./sections/Settings.jsx";
@@ -275,6 +277,7 @@ function App() {
               <div className="tool-head">
                 <button className="icon-btn" onClick={close} aria-label={"Back to " + section.name}><Back /></button>
                 <h1 className="tool-title">{t.name}</h1>
+                <SizeSwitch />
               </div>
               <C report={report(t.id)} />
             </div>
@@ -300,3 +303,4 @@ function App() {
 }
 
 createRoot(document.getElementById("app")).render(<App />);
+startSizing();

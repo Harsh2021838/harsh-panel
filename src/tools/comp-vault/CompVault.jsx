@@ -9,6 +9,7 @@
 import React, { useEffect, useState } from "react";
 import { nodeRequire, extensionPath, evalRaw } from "../../host.js";
 import { toolDir } from "../../library.js";
+import { rem } from "../../density.js";
 import bridge from "./bridge.js";
 import createStore from "./store.js";
 import makeUI from "./ui.js";
@@ -65,7 +66,7 @@ async function build() {
   if (!document.getElementById("comp-vault-css")) {
     const st = document.createElement("style");
     st.id = "comp-vault-css";
-    st.textContent = css;
+    st.textContent = rem(css);
     document.head.appendChild(st);
   }
   const dialog = (multi, folder, title, start, types) => new Promise((resolve) => {

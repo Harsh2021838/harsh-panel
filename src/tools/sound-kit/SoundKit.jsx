@@ -6,8 +6,7 @@
 // Premiere the first time the tool opens. Its library lives in
 // <Harsh Library>/Tools/Sound Kit/library.json (copied once from Documents/ClientSoundKit).
 import { useEffect, useRef, useState } from "react";
-import { followSize } from "../../density.js";
-import SizeSwitch from "../SizeSwitch.jsx";
+import { followSize, rem } from "../../density.js";
 import { nodeRequire, extensionPath, evalRaw, hostName, asciiScript } from "../../host.js";
 import { toolDir } from "../../library.js";
 import source from "./vendor/main.js.txt";
@@ -96,10 +95,11 @@ const LOOK_CSS = `
 .csk-body #clientSelect{height:30px;font-weight:600;background:var(--sunk)}
 .csk-body .icon{width:30px;height:30px;display:inline-flex;align-items:center;justify-content:center;background:transparent;border-color:transparent;color:var(--ink-2)}
 .csk-body .icon:hover{background:var(--raise);color:var(--ink)}
-.csk-body .tabs{margin-top:10px;border-bottom-color:var(--line);gap:2px}
-.csk-body .tab{height:32px;border:0;background:transparent;color:var(--ink-3);font-weight:600;border-radius:0;border-bottom:2px solid transparent}
+.csk-body{padding:4px 12px 0;box-sizing:border-box}
+.csk-body .tabs{margin-top:10px;border:0;gap:2px;padding:2px;border-radius:8px;background:var(--sunk)}
+.csk-body .tab{height:28px;border:0;background:transparent;color:var(--ink-2);font-weight:500;border-radius:6px}
 .csk-body .tab:hover{background:transparent;color:var(--ink)}
-.csk-body .tab.active{color:var(--ink);border-bottom-color:var(--mark)}
+.csk-body .tab.active{color:var(--ink);font-weight:600;background:var(--raise-2);box-shadow:inset 0 0 0 1px var(--line)}
 .csk-body .list{padding:10px 0;gap:8px}
 .csk-body .card{background:var(--raise);border:1px solid var(--line);border-left:4px solid var(--c);border-radius:9px;padding:9px 10px 9px 11px;gap:7px}
 .csk-body .card:hover{background:var(--raise-2)}
@@ -116,7 +116,7 @@ const LOOK_CSS = `
 .csk-body .dropzone{border-top:1px solid var(--line);padding:10px 0 8px}
 .csk-body .dropzone.over{background:var(--mark-soft);outline:2px dashed var(--mark)}
 .csk-body .drop-row{display:flex;gap:6px}
-.csk-body .drop-row button{flex:1;height:32px;margin:0;font-weight:600;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.csk-body .drop-row button{flex:1;min-height:32px;height:auto;padding:5px 8px;margin:0;font-weight:600;min-width:0;line-height:1.2;white-space:normal}
 .csk-body .primary{background:var(--mark);border:1px solid var(--mark);color:var(--mark-ink)}
 .csk-body .primary:hover{background:var(--mark-hover);border-color:var(--mark-hover)}
 .csk-body .capture{background:var(--raise);border:1px solid var(--line)}
@@ -126,19 +126,6 @@ const LOOK_CSS = `
 .csk-body .save{background:var(--mark);border-color:var(--mark);color:var(--mark-ink)}
 .csk-body .swatch{border-radius:5px}
 .csk-body .fader-track{background:var(--sunk);border-color:transparent;border-radius:6px}
-/* sizes */
-:host([data-size="small"]) .csk-body .card{padding:6px 8px 6px 9px;gap:4px;border-radius:7px}
-:host([data-size="small"]) .csk-body .name{font-size:12px}
-:host([data-size="small"]) .csk-body .wave{height:34px}
-:host([data-size="small"]) .csk-body .hint-text{display:none}
-:host([data-size="small"]) .csk-body .hint-row{justify-content:flex-end;margin-top:-2px}
-:host([data-size="small"]) .csk-body .place{height:22px;font-size:11px}
-:host([data-size="small"]) .csk-body .list{gap:5px}
-:host([data-size="small"]) .csk-body .tab{height:28px}
-:host([data-size="small"]) .csk-body .drop-row button{height:28px}
-:host([data-size="large"]) .csk-body .wave{height:78px}
-:host([data-size="large"]) .csk-body .name{font-size:14px}
-:host([data-size="large"]) .csk-body .card{padding:11px 12px 11px 13px;gap:9px}
 `;
 
 const ASK_CSS = ".csk-body { position: relative; }" +
@@ -147,7 +134,7 @@ const ASK_CSS = ".csk-body { position: relative; }" +
   ".ask-msg { margin: 0; font-size: 12.5px; line-height: 1.45; color: var(--text); }" +
   ".ask-input { height: 30px; width: 100%; }" +
   ".ask-acts { display: flex; justify-content: flex-end; gap: 6px; } .ask-acts button { height: 28px; padding: 0 12px; }" +
-  ".ask-yes { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; } .ask-yes:hover { filter: brightness(1.1); }";
+  ".ask-yes { background: var(--mark); border-color: var(--mark); color: var(--mark-ink); font-weight: 600; } .ask-yes:hover { filter: brightness(1.06); }";
 
 function loadHostScript() {
   const p = extensionPath() + "/jsx/client-sound-kit.jsx";
@@ -250,7 +237,7 @@ export default function SoundKit() {
     if (started.current || !host.current) return;
     started.current = true;
     const shadow = host.current.attachShadow({ mode: "open" });
-    shadow.innerHTML = "<style>" + themedCss() + ASK_CSS + LOOK_CSS + "</style><div class=\"csk-body\">" + body + "</div>";
+    shadow.innerHTML = "<style>" + rem(themedCss() + ASK_CSS + LOOK_CSS) + "</style><div class=\"csk-body\">" + body + "</div>";
     const root = shadow.querySelector(".csk-body");
     (async () => {
       try {
@@ -269,7 +256,6 @@ export default function SoundKit() {
   return (
     <div className="sound-kit">
       {error && <p className="msg bad">{error}</p>}
-      <div className="tool-bar-right"><SizeSwitch /></div>
       <div ref={host} className="sound-kit-host" />
     </div>
   );

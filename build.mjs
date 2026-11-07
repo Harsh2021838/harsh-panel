@@ -5,6 +5,10 @@ import * as esbuild from "esbuild";
 import fs from "node:fs";
 import path from "node:path";
 import { execSync } from "node:child_process";
+import { rem } from "./src/density.js";
+
+// Every size in the panel's CSS becomes rem, so the size setting scales all of it (see density.js).
+const remCss = { name: "rem", setup(b) { b.onLoad({ filter: /\.css$/ }, (a) => ({ contents: rem(fs.readFileSync(a.path, "utf8")), loader: "css" })); } };
 
 const pkg = JSON.parse(fs.readFileSync("package.json", "utf8"));
 const out = path.join("dist", "Frameshift " + pkg.version);
@@ -25,6 +29,7 @@ await esbuild.build({
   loader: { ".txt": "text" },
   outfile: path.join(ext, "app", "main.js"),
   logLevel: "warning",
+  plugins: [remCss],
 });
 
 for (const f of fs.readdirSync("scripts")) fs.copyFileSync(path.join("scripts", f), path.join(out, f));

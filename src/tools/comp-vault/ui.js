@@ -1204,7 +1204,7 @@ module.exports = function makeUI(React, deps) {
 
     // ------------------------------------------------ views
     function Crumbs() {
-      var parts = [h("button", { key: "home", className: "hl-crumb is-home", onClick: function () { setScope(null); }, "aria-label": "Comp Vault home", title: "Comp Vault home", "aria-current": !scope ? "page" : undefined }, h(Icon, { name: "home", size: 15 }), !scope ? h("span", null, "Comp Vault") : null)];
+      var parts = [h("button", { key: "home", className: "hl-crumb is-home", onClick: function () { setScope(null); }, "aria-label": "Comp Vault home", title: "Comp Vault home", "aria-current": !scope ? "page" : undefined }, h(Icon, { name: "home", size: 15 }), !scope ? h("span", null, "All folders") : null)];
       if (scope) {
         parts.push(h(Icon, { key: "c1", name: "chevron", size: 12 }));
         if (scope.project) {
@@ -1242,10 +1242,7 @@ module.exports = function makeUI(React, deps) {
         fresh ? h("div", { className: "hl-welcome" },
           h("h2", null, "Save something once, use it in every project"),
           h("p", null, isAE ? "Start with a comp you reuse a lot, or make a folder for a client."
-            : "Add a client’s logos and screenshots here. Animations are saved from After Effects."),
-          h("div", { className: "hl-welcome-actions" },
-            isAE ? h("button", { className: "primary", onClick: function () { openSave("animation"); } }, "Save Comp") : h("button", { className: "primary", onClick: chooseFiles }, "Add Files"),
-            h("button", { className: "ghost", onClick: function () { setSheet({ type: "client" }); } }, "New Client"))) : null,
+            : "Add a client’s logos and screenshots here. Animations are saved from After Effects.")) : null,
         h(Shelf, { title: "Pinned", items: pinned, onOpen: openDetails, onInsert: insert, onMenu: openMenu }),
         h(Shelf, { title: "Recent", items: recent, onOpen: openDetails, onInsert: insert, onMenu: openMenu }),
         h("div", { className: "hl-section-head" },

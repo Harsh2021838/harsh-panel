@@ -6,8 +6,7 @@
 //   - the selection check (every 1.5 s) only runs while this tool is on screen and Premiere isn't
 //     busy with another command, and every timer stops when you leave the tool.
 import { useEffect, useRef, useState } from "react";
-import { followSize } from "../../density.js";
-import SizeSwitch from "../SizeSwitch.jsx";
+import { followSize, rem } from "../../density.js";
 import { extensionPath, evalRaw, hostBusy } from "../../host.js";
 import easeSrc from "./vendor/ease.js.txt";
 import bridgeSrc from "./vendor/host-bridge.js.txt";
@@ -22,7 +21,7 @@ function themedCss() {
       .replace(/--raised:[^;]*;/, "--raised:var(--raise-2);").replace(/--text:[^;]*;/, "--text:var(--ink);")
       .replace(/--muted:[^;]*;/, "--muted:var(--ink-2);") + "}")
     .replace(/html,\s*body\s*\{/, ".eg-body{")
-    .replace(/(^|\n)body\s*\{[^}]*\}/, "$1.eg-body{padding:0 0 24px;}")
+    .replace(/(^|\n)body\s*\{[^}]*\}/, "$1.eg-body{padding:4px 12px 24px;}")
     + LOOK;
 }
 
@@ -31,7 +30,7 @@ function themedCss() {
 const LOOK = `
 .eg-body{position:relative;font:12.5px/1.45 var(--font);color:var(--ink);--accent:var(--mark);--accent-hi:var(--mark-hover);--handle:var(--mark)}
 .eg-body .brand{display:none}
-.eg-body .bar{position:absolute;right:56px;top:-4px;margin:0;z-index:2}
+.eg-body .bar{position:absolute;right:8px;top:4px;margin:0;z-index:2}
 .eg-body button{background:var(--raise);border-color:var(--line);border-radius:7px;color:var(--ink)}
 .eg-body button:hover{background:var(--raise-2);border-color:rgba(255,255,255,.16)}
 .eg-body button.icon{background:transparent;border-color:transparent;color:var(--ink-2);width:26px;height:26px;font-size:14px}
@@ -39,7 +38,7 @@ const LOOK = `
 .eg-body input,.eg-body select{background:var(--sunk);border-color:var(--line);border-radius:7px;color:var(--ink)}
 .eg-body input:focus-visible,.eg-body select:focus-visible{border-color:var(--mark);box-shadow:0 0 0 2px var(--mark-soft)}
 .eg-body :focus-visible{outline-color:var(--mark)}
-.eg-body .top-row{align-items:center;min-height:26px;margin-bottom:6px;padding-right:2px}
+.eg-body .top-row{align-items:center;min-height:26px;margin-bottom:6px;padding-right:30px;gap:8px}
 .eg-body .detected{margin:0;font-size:12px;color:var(--ink-2)}
 .eg-body .detected b{color:var(--ink)}
 .eg-body .detected.none{background:transparent;border:1px dashed var(--line);color:var(--ink-2)}
@@ -101,25 +100,6 @@ const LOOK = `
 .eg-body .how{display:grid;grid-template-columns:1fr 1fr;gap:0;margin:0 0 8px;background:var(--sunk);border-radius:8px;padding:2px}
 .eg-body .how button{background:transparent;border:0;height:28px;font-size:11.5px;color:var(--ink-2);border-radius:6px;padding:0 6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .eg-body .how button.on{background:var(--raise-2);color:var(--ink);font-weight:600}
-/* sizes */
-:host([data-size="small"]) .eg-body .gwrap canvas{height:118px}
-:host([data-size="small"]) .eg-body .more .gwrap canvas{height:96px}
-:host([data-size="small"]) .eg-body .presets{grid-template-columns:repeat(8,1fr);gap:3px;margin-top:6px}
-:host([data-size="small"]) .eg-body .preset{padding:4px 0;border-radius:6px}
-:host([data-size="small"]) .eg-body .preset span{display:none}
-:host([data-size="small"]) .eg-body .preset svg{width:26px;height:16px}
-:host([data-size="small"]) .eg-body .kft-track{height:24px}
-:host([data-size="small"]) .eg-body .kft-seg{height:22px}
-:host([data-size="small"]) .eg-body .kft-key{top:8px;width:7px;height:7px;margin-left:-3.5px}
-:host([data-size="small"]) .eg-body .kft-legend{display:none}
-:host([data-size="small"]) .eg-body .manual,:host([data-size="small"]) .eg-body .ph-row{margin-top:6px}
-:host([data-size="small"]) .eg-body input,:host([data-size="small"]) .eg-body .ph-row button{padding-top:4px;padding-bottom:4px;font-size:11.5px}
-:host([data-size="large"]) .eg-body .gwrap canvas{height:250px}
-:host([data-size="large"]) .eg-body .kft-track{height:44px}
-:host([data-size="large"]) .eg-body .kft-seg{height:42px}
-:host([data-size="large"]) .eg-body .kft-key{top:17px}
-:host([data-size="large"]) .eg-body .preset svg{width:44px;height:28px}
-:host([data-size="large"]) .eg-body .preset{font-size:12px;padding:9px 2px 8px}
 `;
 
 function loadHost() {
@@ -178,7 +158,7 @@ export default function EaseGraph() {
   useEffect(() => {
     if (!host.current) return undefined;
     const shadow = host.current.shadowRoot || host.current.attachShadow({ mode: "open" });
-    shadow.innerHTML = "<style>" + themedCss() + "</style><div class=\"eg-body\">" + body + "</div>";
+    shadow.innerHTML = "<style>" + rem(themedCss()) + "</style><div class=\"eg-body\">" + body + "</div>";
     const root = shadow.querySelector(".eg-body");
     let stop = null, cancelled = false;
     (async () => {
@@ -191,7 +171,6 @@ export default function EaseGraph() {
   return (
     <div className="ease-graph">
       {error && <p className="msg bad">{error}</p>}
-      <div className="tool-bar-right"><SizeSwitch /></div>
       <div ref={host} className="ease-graph-host" />
     </div>
   );

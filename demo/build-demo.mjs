@@ -2,8 +2,9 @@
 // in one self-contained page.   node demo/build-demo.mjs
 import * as esbuild from "esbuild";
 import fs from "node:fs";
+import { rem } from "../src/density.js";
 
-const css = (await esbuild.build({ entryPoints: ["src/styles.css"], bundle: true, minify: true, write: false })).outputFiles[0].text;
+const css = rem((await esbuild.build({ entryPoints: ["src/styles.css"], bundle: true, minify: true, write: false })).outputFiles[0].text);
 const js = (await esbuild.build({
   entryPoints: ["src/main.jsx"], bundle: true, minify: true, format: "iife", target: ["chrome90"], jsx: "automatic",
   charset: "ascii", define: { "process.env.NODE_ENV": '"production"' }, write: false, loader: { ".css": "empty", ".txt": "text" },
