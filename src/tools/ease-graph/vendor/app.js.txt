@@ -663,7 +663,7 @@
     return { ctx: ctx, w: r.width, h: r.height };
   }
   function grid(g) {
-    var ctx = g.ctx; ctx.strokeStyle = '#2a2a2a'; ctx.lineWidth = 1;
+    var ctx = g.ctx; ctx.strokeStyle = 'rgba(255,255,255,0.055)'; ctx.lineWidth = 1;
     for (var i = 0; i <= 4; i++) {
       var x = PAD + i / 4 * (g.w - 2 * PAD) + .5;
       ctx.beginPath(); ctx.moveTo(x, 6); ctx.lineTo(x, g.h - 6); ctx.stroke();
@@ -691,11 +691,11 @@
     };
   }
   function handle(ctx, x, y, color) {
-    ctx.fillStyle = '#1b1b1b'; ctx.strokeStyle = color; ctx.lineWidth = 2;
+    ctx.fillStyle = '#232323'; ctx.strokeStyle = color; ctx.lineWidth = 2;
     ctx.beginPath(); ctx.arc(x, y, 5.5, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
   }
   function hline(ctx, g, m, y, label) {
-    ctx.strokeStyle = '#3a3a3a'; ctx.setLineDash([3, 4]); ctx.lineWidth = 1;
+    ctx.strokeStyle = 'rgba(255,255,255,0.13)'; ctx.setLineDash([3, 4]); ctx.lineWidth = 1;
     ctx.beginPath(); ctx.moveTo(PAD, m.y(y) + .5); ctx.lineTo(g.w - PAD, m.y(y) + .5); ctx.stroke(); ctx.setLineDash([]);
     if (label) { ctx.fillStyle = '#777'; ctx.font = '10px sans-serif'; ctx.fillText(label, g.w - PAD - ctx.measureText(label).width, m.y(y) - 3); }
   }
@@ -709,15 +709,15 @@
   function drawValue() {
     var g = prep(cvV), ctx = g.ctx, R = valueRange(), m = mapper(g, R), f = E.compile(state.curve);
     hline(ctx, g, m, 0); hline(ctx, g, m, 1);
-    ctx.strokeStyle = '#4d9df8'; ctx.lineWidth = 2; ctx.beginPath();
+    ctx.strokeStyle = '#edebe6'; ctx.lineWidth = 2.25; ctx.beginPath();
     for (var i = 0; i <= 160; i++) { var x = i / 160; i ? ctx.lineTo(m.x(x), m.y(f(x))) : ctx.moveTo(m.x(x), m.y(f(x))); }
     ctx.stroke();
     if (state.curve.type === 'bezier') {
       var p = state.curve.p;
-      ctx.strokeStyle = '#f2a43a'; ctx.lineWidth = 1.2;
+      ctx.strokeStyle = '#f4d23c'; ctx.lineWidth = 1.2;
       ctx.beginPath(); ctx.moveTo(m.x(0), m.y(0)); ctx.lineTo(m.x(p[0]), m.y(p[1])); ctx.stroke();
       ctx.beginPath(); ctx.moveTo(m.x(1), m.y(1)); ctx.lineTo(m.x(p[2]), m.y(p[3])); ctx.stroke();
-      handle(ctx, m.x(p[0]), m.y(p[1]), '#f2a43a'); handle(ctx, m.x(p[2]), m.y(p[3]), '#f2a43a');
+      handle(ctx, m.x(p[0]), m.y(p[1]), '#f4d23c'); handle(ctx, m.x(p[2]), m.y(p[3]), '#f4d23c');
     }
     keySquare(ctx, m.x(0), m.y(0)); keySquare(ctx, m.x(1), m.y(1));
     if (state.progress != null) {
@@ -733,7 +733,7 @@
   function drawSpeed() {
     var g = prep(cvS), ctx = g.ctx, R = speedRange(), m = mapper(g, R), s = E.speedFn(state.curve);
     hline(ctx, g, m, 0);
-    ctx.strokeStyle = '#4caf7d'; ctx.lineWidth = 2; ctx.beginPath();
+    ctx.strokeStyle = '#6bd6ae'; ctx.lineWidth = 2.25; ctx.beginPath();
     for (var i = 0; i <= 160; i++) {
       var x = i / 160, y = Math.max(R[0], Math.min(R[1], s(x)));
       i ? ctx.lineTo(m.x(x), m.y(y)) : ctx.moveTo(m.x(x), m.y(y));
@@ -741,10 +741,10 @@
     ctx.stroke();
     if (state.curve.type === 'bezier') {
       var ae = E.toAE(state.curve);
-      ctx.strokeStyle = '#f2a43a'; ctx.lineWidth = 1.2;
+      ctx.strokeStyle = '#f4d23c'; ctx.lineWidth = 1.2;
       ctx.beginPath(); ctx.moveTo(m.x(0), m.y(ae.outSpd)); ctx.lineTo(m.x(ae.outInf), m.y(ae.outSpd)); ctx.stroke();
       ctx.beginPath(); ctx.moveTo(m.x(1), m.y(ae.inSpd)); ctx.lineTo(m.x(1 - ae.inInf), m.y(ae.inSpd)); ctx.stroke();
-      handle(ctx, m.x(ae.outInf), m.y(ae.outSpd), '#f2a43a'); handle(ctx, m.x(1 - ae.inInf), m.y(ae.inSpd), '#f2a43a');
+      handle(ctx, m.x(ae.outInf), m.y(ae.outSpd), '#f4d23c'); handle(ctx, m.x(1 - ae.inInf), m.y(ae.inSpd), '#f4d23c');
       keySquare(ctx, m.x(0), m.y(ae.outSpd)); keySquare(ctx, m.x(1), m.y(ae.inSpd));
     }
     cvS._m = m;

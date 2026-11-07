@@ -81,6 +81,51 @@ function askBox(shadow, message, value, withInput, done) {
   setTimeout(() => (input || wrap.querySelector(".ask-yes")).focus(), 0);
 }
 
+// Frameshift's look over the original stylesheet: flat surfaces, the Premiere label colour as each
+// sound's identity (a full-height stripe and its waveform), one yellow accent for what's chosen.
+const LOOK_CSS = `
+.csk-body{font:12.5px/1.4 var(--font);--accent:var(--mark);--line:rgba(255,255,255,.09);--panel:var(--raise);--panel-2:var(--raise-2);background:transparent}
+.csk-body button,.csk-body input,.csk-body select{border-radius:7px;border-color:var(--line);background:var(--raise);color:var(--ink);height:28px}
+.csk-body button:hover{background:var(--raise-2);border-color:rgba(255,255,255,.16)}
+.csk-body input:focus,.csk-body select:focus{border-color:var(--mark)}
+.csk-body :focus-visible{outline-color:var(--mark)!important}
+.csk-body .top{padding:4px 0 0}
+.csk-body .row{gap:4px;align-items:center}
+.csk-body #clientSelect{height:30px;font-weight:600;background:var(--sunk)}
+.csk-body .icon{width:30px;height:30px;display:inline-flex;align-items:center;justify-content:center;background:transparent;border-color:transparent;color:var(--ink-2)}
+.csk-body .icon:hover{background:var(--raise);color:var(--ink)}
+.csk-body .tabs{margin-top:10px;border-bottom-color:var(--line);gap:2px}
+.csk-body .tab{height:32px;border:0;background:transparent;color:var(--ink-3);font-weight:600;border-radius:0;border-bottom:2px solid transparent}
+.csk-body .tab:hover{background:transparent;color:var(--ink)}
+.csk-body .tab.active{color:var(--ink);border-bottom-color:var(--mark)}
+.csk-body .list{padding:10px 0;gap:8px}
+.csk-body .card{background:var(--raise);border:1px solid var(--line);border-left:4px solid var(--c);border-radius:9px;padding:9px 10px 9px 11px;gap:7px}
+.csk-body .card:hover{background:var(--raise-2)}
+.csk-body .card.editing{background:var(--raise-2);border-color:rgba(255,255,255,.16);border-left-color:var(--c)}
+.csk-body .dot{display:none}
+.csk-body .name{font-size:13px;letter-spacing:-.005em}
+.csk-body .badge{background:var(--sunk);border-color:transparent;color:var(--ink-2);border-radius:5px;font-variant-numeric:tabular-nums}
+.csk-body .wave{background:var(--sunk);border:0;border-radius:6px;height:56px}
+.csk-body .hint-text{color:var(--ink-3)}
+.csk-body .place{height:26px;background:transparent;border-color:var(--line)}
+.csk-body .place:hover{border-color:var(--c);background:var(--raise-2)}
+.csk-body .group{color:var(--ink-3);text-transform:none;letter-spacing:0;font-size:11.5px}
+.csk-body .empty{border:1px dashed var(--line);border-radius:10px;padding:26px 16px;color:var(--ink-2);line-height:1.55;margin-top:4px}
+.csk-body .dropzone{border-top:1px solid var(--line);padding:10px 0 8px}
+.csk-body .dropzone.over{background:var(--mark-soft);outline:2px dashed var(--mark)}
+.csk-body .drop-row{display:flex;gap:6px}
+.csk-body .drop-row button{flex:1;height:32px;margin:0;font-weight:600;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.csk-body .primary{background:var(--mark);border:1px solid var(--mark);color:var(--mark-ink)}
+.csk-body .primary:hover{background:var(--mark-hover);border-color:var(--mark-hover)}
+.csk-body .capture{background:var(--raise);border:1px solid var(--line)}
+.csk-body .hint{color:var(--ink-3);margin-top:6px}
+.csk-body .status{background:transparent;border-top:1px solid var(--line);color:var(--ink-3);padding:6px 0 0}
+.csk-body .status.ok{color:var(--good)} .csk-body .status.err{color:var(--bad)}
+.csk-body .save{background:var(--mark);border-color:var(--mark);color:var(--mark-ink)}
+.csk-body .swatch{border-radius:5px}
+.csk-body .fader-track{background:var(--sunk);border-color:transparent;border-radius:6px}
+`;
+
 const ASK_CSS = ".csk-body { position: relative; }" +
   ".ask { position: absolute; inset: 0; z-index: 50; display: flex; align-items: flex-start; justify-content: center; padding: 64px 12px; background: rgba(0,0,0,.45); }" +
   ".ask-box { width: 100%; max-width: 320px; background: var(--bg); background-image: linear-gradient(var(--panel), var(--panel)); border: 1px solid var(--line); border-radius: 10px; padding: 14px; display: flex; flex-direction: column; gap: 10px; box-shadow: 0 10px 30px rgba(0,0,0,.4); }" +
@@ -189,7 +234,7 @@ export default function SoundKit() {
     if (started.current || !host.current) return;
     started.current = true;
     const shadow = host.current.attachShadow({ mode: "open" });
-    shadow.innerHTML = "<style>" + themedCss() + ASK_CSS + "</style><div class=\"csk-body\">" + body + "</div>";
+    shadow.innerHTML = "<style>" + themedCss() + ASK_CSS + LOOK_CSS + "</style><div class=\"csk-body\">" + body + "</div>";
     const root = shadow.querySelector(".csk-body");
     (async () => {
       try {

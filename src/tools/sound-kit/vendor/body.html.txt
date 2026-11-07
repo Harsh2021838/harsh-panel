@@ -1,10 +1,10 @@
   <header class="top">
     <div class="row">
       <select id="clientSelect" title="Client" aria-label="Client"></select>
-      <button id="addClient" class="icon" title="New client" aria-label="New client">+</button>
-      <button id="renameClient" class="icon" title="Rename client" aria-label="Rename client">✎</button>
-      <button id="deleteClient" class="icon" title="Delete client" aria-label="Delete client">🗑</button>
-      <button id="settingsBtn" class="icon" title="Settings" aria-label="Settings">⚙</button>
+      <button id="addClient" class="icon" title="New client" aria-label="New client"><svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3v10M3 8h10"/></svg></button>
+      <button id="renameClient" class="icon" title="Rename client" aria-label="Rename client"><svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.5 2.8l2.7 2.7L6 12.7l-3.3.6.6-3.3z"/></svg></button>
+      <button id="deleteClient" class="icon" title="Delete client" aria-label="Delete client"><svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 4.5h10M6.5 4.5V3h3v1.5M4.5 4.5l.6 8.5h5.8l.6-8.5"/></svg></button>
+      <button id="settingsBtn" class="icon" title="Settings" aria-label="Settings"><svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 5.6a2.4 2.4 0 1 0 0 4.8 2.4 2.4 0 0 0 0-4.8ZM8 1.5v1.7M8 12.8v1.7M1.5 8h1.7M12.8 8h1.7M3.4 3.4l1.2 1.2M11.4 11.4l1.2 1.2M3.4 12.6l1.2-1.2M11.4 4.6l1.2-1.2"/></svg></button>
     </div>
     <div class="tabs" role="tablist">
       <button class="tab active" data-kind="sfx" role="tab">SFX</button>
@@ -18,10 +18,12 @@
   <main id="settings" class="list hidden"></main>
 
   <div id="dropzone" class="dropzone">
-    <button id="captureBtn" class="capture hidden">Save selected timeline clips</button>
-    <button id="addSelected" class="capture">Add what&rsquo;s selected in Premiere</button>
-    <button id="addSounds" class="primary wide">+ Add sounds</button>
-    <div class="hint" id="dropHint">or drag audio files here</div>
+    <div class="drop-row">
+      <button id="addSounds" class="primary">Add sounds</button>
+      <button id="captureBtn" class="capture hidden">Save selected timeline clips</button>
+      <button id="addSelected" class="capture">From Premiere selection</button>
+    </div>
+    <div class="hint" id="dropHint">or drop audio files or timeline clips here</div>
   </div>
 
   <footer id="status" class="status" role="status">Ready</footer>

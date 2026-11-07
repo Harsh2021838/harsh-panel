@@ -346,8 +346,8 @@
     $('#captureBtn').classList.toggle('hidden', lib.activeKind !== 'part');
     $('#addSelected').classList.toggle('hidden', lib.activeKind === 'part');
     $('#dropHint').textContent = lib.activeKind === 'part'
-      ? 'Select a keyframed BGM clip on the timeline, then press Save selected timeline clip'
-      : 'or drag audio files here';
+      ? 'Select BGM clips on the timeline (with their keyframes and fades), then save them'
+      : 'or drop audio files or timeline clips here';
   }
 
   function trackLabel(t) { return t < 0 ? 'Auto' : 'A' + (t + 1); }
