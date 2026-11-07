@@ -51,6 +51,7 @@
     lstatSync: function (p) { return fs.statSync(p); },
     openSync: function (p) { return p; },
     closeSync: function () {},
+    fstatSync: function (fd) { return fs.statSync(fd); },
     readSync: function (fd, buf, off, len, pos) { var v = String(mem[fd] || ""); for (var i = 0; i < len; i++) buf[off + i] = v.charCodeAt(pos + i) & 255 || 0; return len; },
     rmSync: function (p) { Object.keys(mem).forEach(function (k) { if (k === p || k.indexOf(p + "/") === 0) delete mem[k]; }); Object.keys(dirs).forEach(function (k) { if (k === p || k.indexOf(p + "/") === 0) delete dirs[k]; }); },
     unlinkSync: function (p) { delete mem[p]; }
@@ -102,6 +103,15 @@
       }, 450);
     } };
   } };
+  // Text QC talks to LanguageTool with fetch: answer it here.
+  var realFetch = window.fetch;
+  window.fetch = function (url, opt) {
+    if (String(url).indexOf("languagetool") !== -1) {
+      var text = new URLSearchParams(opt && opt.body).get("text");
+      return new Promise(function (res) { setTimeout(function () { res(new Response(JSON.stringify({ matches: check(text) }), { status: 200 })); }, 450); });
+    }
+    return realFetch.apply(window, arguments);
+  };
   var os = { platform: function () { return "darwin"; }, homedir: function () { return "/Users/harsh"; }, tmpdir: function () { return "/tmp"; } };
   window.require = function (n) { return { fs: fs, path: path, https: https, http: https, os: os, buffer: { Buffer: B } }[n]; };
 

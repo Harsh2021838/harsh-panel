@@ -12,6 +12,9 @@ const MUSIC_NAME = /music|\bbgm\b|song|\bes_|epidemic|artlist|soundstripe|musicb
 const SFX_NAME = /sfx|whoosh|swoosh|swish|\bhit\b|impact|riser|click|\bpop\b|ding|boom|swipe|typing|notification|\bbell\b|shutter|glitch|transition|thud|sweep|stinger|\bfx\b/i;
 const TRACK_VOICE = /dialog|voice|\bvo\b|\bmic\b|speech|narrat/i, TRACK_MUSIC = /music|bgm|song|score/i, TRACK_SFX = /sfx|\bfx\b|effects?/i;
 
+// Effects that keep a clip from going over 0 dB on their own.
+const LIMITER = /limit|compress|dynamics|maximi|multiband|loudness|clip ?gain|brickwall|ceiling|vocal enhancer/i;
+
 export const ROLE_NAMES = { voice: "Voice", sfx: "SFX", music: "Music", skip: "Skip" };
 
 /** Guess what each audio track holds: { trackIndex: "voice" | "sfx" | "music" }. */
@@ -23,15 +26,36 @@ export function detectRoles(dump) {
     const frac = (re) => T.clips.reduce((s, c) => s + (re.test(c.name) || re.test(c.path.split(/[\\/]/).pop()) ? c.end - c.start : 0), 0) / total;
     const video = T.clips.reduce((s, c) => s + (VIDEO_FILE.test(c.path) ? c.end - c.start : 0), 0) / total;
     const lens = T.clips.map((c) => c.end - c.start).sort((a, b) => a - b), median = lens[lens.length >> 1];
+    // One long recording cut many times (an interview or VO edited down) is the voice, however
+    // short each piece is: 4+ pieces of the same file, picked from different places in it.
+    const byFile = {};
+    T.clips.forEach((c) => (byFile[c.path] = byFile[c.path] || []).push(c));
+    const cutUp = Object.keys(byFile).reduce((s, p) => {
+      const g = byFile[p];
+      if (g.length < 4) return s;
+      const ins = g.map((c) => Math.round(c.inS)), spread = Math.max(...g.map((c) => c.outS)) - Math.min(...g.map((c) => c.inS));
+      return new Set(ins).size >= 4 && spread >= 30 && !MUSIC_NAME.test(p) ? s + g.reduce((a, c) => a + c.end - c.start, 0) : s;
+    }, 0) / total;
     let role;
     if (TRACK_VOICE.test(T.name)) role = "voice";
     else if (TRACK_MUSIC.test(T.name)) role = "music";
     else if (TRACK_SFX.test(T.name)) role = "sfx";
-    else if (video >= 0.5 || frac(VOICE_NAME) >= 0.5) role = "voice";
+    else if (video >= 0.5 || frac(VOICE_NAME) >= 0.5 || cutUp >= 0.5) role = "voice";
     else if (frac(MUSIC_NAME) >= 0.4 || median >= 20) role = "music";
     else if (median < 8 || frac(SFX_NAME) >= 0.3) role = "sfx";
     else role = "music";
     roles[T.index] = role;
+  }
+  // No voice found: the track with the most sound that isn't music is the likeliest voice.
+  if (!Object.values(roles).includes("voice")) {
+    let best = null, most = 0;
+    for (const T of dump.tracks) {
+      if (roles[T.index] !== "sfx") continue;
+      const d = T.clips.reduce((s, c) => s + c.end - c.start, 0);
+      if (d > most) { most = d; best = T.index; }
+    }
+    const all = dump.tracks.reduce((s, T) => s + T.clips.reduce((a, c) => a + c.end - c.start, 0), 0);
+    if (best !== null && most > 0.3 * (dump.outS - dump.inS) && most > 0.3 * all) roles[best] = "voice";
   }
   return roles;
 }
@@ -80,6 +104,7 @@ export function analyze(dump, envs, roles, opts) {
   const issues = [], keys = new Map(), frame = 1 / (dump.fps || 25);
   const checks = opts.checks;
   const add = (it) => {
+    if (it.path === undefined) { const c = clips.find((x) => x.track === it.track && x.i === it.i && x.start === it.start); it.path = c ? c.path : ""; }
     const base = it.kind + "|" + it.track + "|" + it.name + "|" + (it.inS === undefined ? "" : Math.round(it.inS * 10)) + "|" + (it.other || "");
     const n = keys.get(base) || 0; keys.set(base, n + 1);
     it.key = n ? base + "#" + n : base;
@@ -89,7 +114,7 @@ export function analyze(dump, envs, roles, opts) {
   for (const T of dump.tracks) {
     const role = roles[T.index];
     if (!role || role === "skip") continue;
-    for (const c of T.clips) clips.push({ ...c, track: T.index, trackName: "A" + (T.index + 1), role });
+    for (const c of T.clips) clips.push({ ...c, track: T.index, trackName: "A" + (T.index + 1), role, limited: (c.fx || []).some((n) => LIMITER.test(n)) });
   }
 
   // ---- rebuild the timeline's sound, hop by hop
@@ -117,16 +142,19 @@ export function analyze(dump, envs, roles, opts) {
   if (checks.distortion) {
     const hot = new Uint8Array(N);
     for (const c of clips) {
-      if (c.unread || !(c.maxPk > 1.0)) continue;
+      if (c.unread || !(c.maxPk > 1.0) || c.limited || (opts.limiter && c.role === "voice")) continue;
       add({ kind: "clip", t: c.maxAt, track: c.track, trackName: c.trackName, i: c.i, start: c.start, name: c.name, inS: c.inS, value: db20(c.maxPk),
         what: "Too loud: peaks at " + fmt(db20(c.maxPk)), detail: "“" + c.name + "” goes over 0 dB, so it will distort in the render. Turn its volume down by about " + Math.ceil(db20(c.maxPk) + 1) + " dB." });
       for (let h = Math.max(0, Math.floor((c.start - t0) / HOP)); h < Math.min(N, Math.ceil((c.end - t0) / HOP)); h++) hot[h] = 1;
     }
-    let h = 0;
+    // Sounds playing together add up; peaks rarely line up exactly, so the mix estimate adds them
+    // as powers. Skipped when there's a limiter on the mix.
+    const mixPk = (h) => Math.sqrt(pSq[h]);
+    let h = opts.limiter ? N : 0;
     while (h < N) {
-      if (!(pSum[h] > 1.12 && Math.sqrt(pSq[h]) > 0.89) || hot[h]) { h++; continue; }
+      if (!(mixPk(h) > 1.06) || hot[h]) { h++; continue; }
       let e = h, peak = 0;
-      while (e < N && pSum[e] > 1.0 && !hot[e]) { peak = Math.max(peak, pSum[e]); e++; }
+      while (e < N && mixPk(e) > 1.0 && !hot[e]) { peak = Math.max(peak, mixPk(e)); e++; }
       const at = t0 + h * HOP;
       add({ kind: "mix", t: at, track: -1, trackName: "Mix", i: -1, start: at, name: "mix@" + Math.round(at), value: db20(peak),
         what: "Mix too loud: up to about " + fmt(db20(peak)), detail: "Several sounds play loud at once here and add up to over 0 dB, so it may distort. Lower the music or SFX here, or put a limiter on the mix." });

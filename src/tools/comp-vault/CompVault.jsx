@@ -47,7 +47,7 @@ function moveOldItems(fs, path, oldRoot, newRoot) {
 let built = null; // the UI component, made once
 async function build() {
   if (built) return built;
-  const fs = nodeRequire("fs"), path = nodeRequire("path"), os = nodeRequire("os"), cp = nodeRequire("child_process");
+  const fs = nodeRequire("fs"), path = nodeRequire("path"), os = nodeRequire("os");
   let crypto = null;
   try { crypto = nodeRequire("crypto"); } catch (e) {}
   const root = await toolDir("Comp Vault");
@@ -80,11 +80,10 @@ async function build() {
     pickProject: () => dialog(false, false, "Pick an After Effects or Premiere project", "", ["aep", "aepx", "prproj"]),
     pickFolder: (start, title) => dialog(false, true, title || "Choose a folder", start).then((d) => d && d[0]),
     openFolder: (p) => {
-      try {
-        fs.mkdirSync(p, { recursive: true });
-        if (process.platform === "darwin") cp.spawn("open", [p], { detached: true });
-        else cp.spawn("explorer", [p.replace(/\//g, "\\")], { detached: true });
-      } catch (e) { console.error("Comp Vault: open folder", e); }
+      // Opened by the app's script engine, not Node's child_process (Node callbacks inside the
+      // panel can crash the panel engine).
+      try { fs.mkdirSync(p, { recursive: true }); } catch (e) {}
+      evalRaw("(function(){var f=new Folder(" + JSON.stringify(p) + ");if(f.exists)f.execute();return 'OK';})()").catch(() => {});
     },
   });
   return built;

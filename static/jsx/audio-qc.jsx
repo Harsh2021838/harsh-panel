@@ -145,11 +145,18 @@
                 if (!path) { out.nested++; continue; }
                 var v = { db: 0, keys: [], mode: "media" };
                 try { v = readVolume(c); } catch (e4) {}
+                var fx = [];
+                try {
+                    for (var k = 0; k < c.components.numItems; k++) {
+                        var dn = String(c.components[k].displayName || "");
+                        if (!/^(volume|channel volume|panner|panner \(legacy\)|balance)$/i.test(dn)) fx.push(dn);
+                    }
+                } catch (e6) {}
                 var fades = [0, 0];
                 try { fades = fadesOf(tr, c); } catch (e5) {}
                 T.clips.push({ i: i, name: String(c.name), path: path, start: r(st, 4), end: r(en, 4),
                     inS: r(c.inPoint.seconds, 4), outS: r(c.outPoint.seconds, 4),
-                    db: v.db, keys: v.keys, fadeIn: fades[0], fadeOut: fades[1] });
+                    db: v.db, keys: v.keys, fadeIn: fades[0], fadeOut: fades[1], fx: fx });
             }
         }
         step("done");

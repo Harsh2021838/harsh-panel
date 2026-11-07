@@ -121,26 +121,23 @@ export const DEFAULT_FEED = "Harsh2021838/harsh-panel"; // GitHub releases: newe
 export function updateFeed() { try { const v = localStorage.getItem(FEED_KEY); return v === null ? DEFAULT_FEED : v; } catch (e) { return DEFAULT_FEED; } }
 export function setUpdateFeed(v) { try { localStorage.setItem(FEED_KEY, String(v || "").trim()); } catch (e) {} }
 
-function get(url, asBuffer, hops = 0) {
-  const https = nodeRequire("https"), http = nodeRequire("http");
-  return new Promise((resolve, reject) => {
-    const u = new URL(url);
-    const req = (u.protocol === "http:" ? http : https).get({
-      hostname: u.hostname, port: u.port || undefined, path: u.pathname + u.search,
-      headers: { "User-Agent": "Frameshift-panel-updater", Accept: asBuffer ? "application/octet-stream" : "application/json" },
-    }, (res) => {
-      if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location && hops < 6) {
-        res.resume();
-        return resolve(get(new URL(res.headers.location, url).toString(), asBuffer, hops + 1));
-      }
-      if (res.statusCode !== 200) { res.resume(); return reject(new Error("The update source answered " + res.statusCode + ".")); }
-      const chunks = [];
-      res.on("data", (c) => chunks.push(c));
-      res.on("end", () => { const b = Buffer.concat(chunks); resolve(asBuffer ? b : b.toString("utf8")); });
-    });
-    req.on("error", (e) => reject(new Error("Couldn’t reach the update source (" + e.message + ").")));
-    req.setTimeout(60000, () => req.destroy(new Error("timed out")));
-  });
+// The browser's fetch, not Node's https: Node network callbacks inside the panel can crash
+// Premiere's panel engine (CEPHtmlEngine), above all around the reload after an update.
+async function get(url, asBuffer) {
+  const ctl = new AbortController(), timer = setTimeout(() => ctl.abort(), 120000);
+  let res;
+  try {
+    res = await fetch(url, { signal: ctl.signal, headers: { Accept: asBuffer ? "application/octet-stream" : "application/json" }, cache: "no-store" });
+  } catch (e) {
+    clearTimeout(timer);
+    throw new Error("Couldn\u2019t reach the update source (" + (e.name === "AbortError" ? "timed out" : e.message) + ").");
+  }
+  try {
+    if (res.status !== 200) throw new Error("The update source answered " + res.status + ".");
+    if (!asBuffer) return await res.text();
+    const NodeBuffer = nodeRequire("buffer").Buffer;
+    return NodeBuffer.from(new Uint8Array(await res.arrayBuffer()));
+  } finally { clearTimeout(timer); }
 }
 
 /** What the update source says is newest: { version, url } or null. */

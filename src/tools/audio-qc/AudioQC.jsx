@@ -20,6 +20,12 @@ const CHECKS = [
 ];
 const KIND_TAG = { clip: "Distortion", mix: "Distortion", music: "Over voice", cover: "Over voice", sfx: "SFX level", click: "Click" };
 const KEY = "harsh.audioqc.";
+const ICON = { click: "\u2307", sfx: "\u21C5", clip: "!", mix: "!", music: "\u266A", cover: "\u266A" };
+function groupTitle(G) {
+  const n = G.items.length;
+  return { click: n + " hard cuts or abrupt sounds", clip: n + " clips too loud", mix: "Mix too loud in " + n + " places",
+    music: "Music too close to the voice in " + n + " places", cover: "SFX over the voice " + n + " times", sfx: n + " uses at a different level" }[G.kind] || n + " issues";
+}
 const REMEMBER_HOURS = 5;
 const lsGet = (k, d) => { try { const v = localStorage.getItem(KEY + k); return v === null ? d : JSON.parse(v); } catch (e) { return d; } };
 const lsSet = (k, v) => { try { localStorage.setItem(KEY + k, JSON.stringify(v)); } catch (e) {} };
@@ -38,6 +44,7 @@ export default function AudioQC({ report = () => {} }) {
   const [checks, setChecks] = useState(() => ({ distortion: true, cover: true, sfx: true, click: true, ...lsGet("checks", {}) }));
   const [musicGap, setMusicGap] = useState(() => lsGet("musicGap", 10));
   const [sfxSpread, setSfxSpread] = useState(() => lsGet("sfxSpread", 6));
+  const [limiter, setLimiter] = useState(() => lsGet("limiter", false));
   const [phase, setPhase] = useState("idle");
   const [progress, setProgress] = useState("");
   const [run, setRun] = useState(null);
@@ -54,6 +61,7 @@ export default function AudioQC({ report = () => {} }) {
   useEffect(() => { lsSet("checks", checks); }, [checks]);
   useEffect(() => { lsSet("musicGap", musicGap); }, [musicGap]);
   useEffect(() => { lsSet("sfxSpread", sfxSpread); }, [sfxSpread]);
+  useEffect(() => { lsSet("limiter", limiter); }, [limiter]);
   useEffect(() => { lsSet("autoGo", autoGo); }, [autoGo]);
 
   const scope = run ? "ignored:" + run.dump.project + "@" + run.session : "";
@@ -61,7 +69,20 @@ export default function AudioQC({ report = () => {} }) {
   const todo = issues.filter((g) => !state[g.key]);
   const ignored = issues.filter((g) => state[g.key] === "ignored");
   const handled = issues.filter((g) => state[g.key] === "corrected");
-  const current = todo.find((g) => g.key === sel) || null;
+  // Rows of the same kind from the same file are one group: a 15-minute voice recording with
+  // 40 hard cuts is one row you open, not 40 rows.
+  const groups = [];
+  { const byKey = new Map();
+    for (const g of todo) {
+      const gk = g.kind + "|" + (g.path || g.name) + "|" + g.track;
+      let G = byKey.get(gk);
+      if (!G) { G = { key: gk, kind: g.kind, items: [], path: g.path || "", trackName: g.trackName }; byKey.set(gk, G); groups.push(G); }
+      G.items.push(g);
+    } }
+  const flat = groups.reduce((a, G) => a.concat(G.items), []);
+  const current = flat.find((g) => g.key === sel) || null;
+  const [openGroups, setOpenGroups] = useState({});
+  const groupOf = (g) => groups.find((G) => G.items.indexOf(g) !== -1);
   useEffect(() => { report(phase === "checking" ? { running: true } : run ? { count: todo.length, at: run.at } : null); }, [phase, run, todo.length]);
 
   async function check(rolesOverride) {
@@ -85,7 +106,7 @@ export default function AudioQC({ report = () => {} }) {
         catch (e) { envs[p] = { error: /ENOENT/.test(e.message) ? "file not found" : e.message }; }
       }
       setProgress("Checking…");
-      const result = analyze(dump, envs, roles, { checks, musicGap, sfxSpread });
+      const result = analyze(dump, envs, roles, { checks, musicGap, sfxSpread, limiter });
       result.issues.forEach((g) => { g.tc = timecode(g.t, dump.fps); });
       const session = await appSession();
       const kept = remembered("ignored:" + dump.project + "@" + session), st = {};
@@ -120,7 +141,7 @@ export default function AudioQC({ report = () => {} }) {
   function pick(g, jump) { setSel(g ? g.key : null); if (g && jump) go(g); }
   function done(g, v) {
     setMark(g, v);
-    const idx = todo.indexOf(g), rest = todo.filter((x) => x.key !== g.key);
+    const idx = flat.indexOf(g), rest = flat.filter((x) => x.key !== g.key);
     pick(rest[Math.min(idx, rest.length - 1)] || null, autoGo);
   }
 
@@ -129,10 +150,10 @@ export default function AudioQC({ report = () => {} }) {
     const onKey = (e) => {
       if (/input|select|textarea/i.test(e.target.tagName) || e.metaKey || e.ctrlKey || e.altKey) return;
       if (!listRef.current || !listRef.current.offsetParent) return;
-      const i = todo.indexOf(current), k = e.key.toLowerCase();
+      const i = flat.indexOf(current), k = e.key.toLowerCase();
       if (e.key === "ArrowDown" || e.key === "ArrowUp") {
         e.preventDefault();
-        const n = todo[Math.max(0, Math.min(todo.length - 1, i + (e.key === "ArrowDown" ? 1 : -1)))];
+        const n = flat[Math.max(0, Math.min(flat.length - 1, i + (e.key === "ArrowDown" ? 1 : -1)))];
         if (n) pick(n, autoGo);
       } else if (!current) return;
       else if (e.key === "Enter") go(current);
@@ -190,6 +211,11 @@ export default function AudioQC({ report = () => {} }) {
               <span className="gap-size-label">dB</span>
             </div>
           )}
+          {checks.distortion && (
+            <label className="check-inline" title="Clips with their own limiter or compressor are never flagged. Tick this when the limiter is on the track or master, where scripts can't see it.">
+              <input type="checkbox" checked={limiter} disabled={busy} onChange={() => setLimiter(!limiter)} /> My voice or master track has a limiter (loud voice is fine)
+            </label>
+          )}
           <button className="primary" disabled={busy || !CHECKS.some(([id]) => checks[id])} onClick={() => check()}>{busy ? "Checking…" : run ? "Check again" : "Check audio"}</button>
         </div>
       )}
@@ -246,18 +272,16 @@ export default function AudioQC({ report = () => {} }) {
       )}
       {run && todo.length > 0 && (
         <ol className="rows gap-list" ref={listRef}>
-          {todo.slice(0, 200).map((g) => {
+          {(() => { const row = (g, sub) => {
             const on = current === g;
             return (
-              <li key={g.key} className={"gap-row" + (on ? " sel" : "")}>
+              <li key={g.key} className={"gap-row" + (on ? " sel" : "") + (sub ? " sub" : "")}>
                 <button className="gap-pick" aria-current={on ? "true" : undefined} onClick={() => pick(g, true)} title="Go to it">
-                  <span className={"aq-kind " + g.kind} aria-hidden="true">{g.kind === "click" ? "⌇" : g.kind === "sfx" ? "⇅" : g.kind === "clip" || g.kind === "mix" ? "!" : "♪"}</span>
+                  {!sub && <span className={"aq-kind " + g.kind} aria-hidden="true">{ICON[g.kind]}</span>}
                   <span className="row-main">
-                    <span className="row-word">{g.what}</span>
+                    <span className="row-word">{sub ? <span className="num">{g.tc}</span> : g.what}</span>
                     <span className="row-where">
-                      <span className="num">{g.tc}</span>
-                      <span>{g.trackName}</span>
-                      <span className="dim">{KIND_TAG[g.kind]}</span>
+                      {sub ? <span>{g.what}</span> : <><span className="num">{g.tc}</span><span>{g.trackName}</span><span className="dim">{KIND_TAG[g.kind]}</span></>}
                     </span>
                     {on && <span className="gap-detail">{g.detail}</span>}
                   </span>
@@ -268,7 +292,30 @@ export default function AudioQC({ report = () => {} }) {
                 </span>
               </li>
             );
-          })}
+          };
+          return groups.slice(0, 150).map((G) => {
+            if (G.items.length === 1) return row(G.items[0], false);
+            const open = openGroups[G.key] || G.items.indexOf(current) !== -1;
+            return (
+              <li key={G.key} className={"aq-group" + (open ? " open" : "")}>
+                <div className="gap-row aq-head">
+                  <button className="gap-pick" aria-expanded={open} onClick={() => { setOpenGroups({ ...openGroups, [G.key]: !open }); if (!open) pick(G.items[0], true); else if (G.items.indexOf(current) !== -1) setSel(null); }}>
+                    <span className={"aq-kind " + G.kind} aria-hidden="true">{ICON[G.kind]}</span>
+                    <span className="row-main">
+                      <span className="row-word">{groupTitle(G)}</span>
+                      <span className="row-where"><span className="trunc">{baseName(G.path) || G.items[0].name}</span><span>{G.trackName}</span><span className="dim">first at {G.items[0].tc}</span></span>
+                    </span>
+                    <span className="aq-count num">{G.items.length}</span>
+                  </button>
+                  <span className="gap-acts">
+                    <button className="act good" onClick={() => G.items.forEach((g) => setMark(g, "corrected"))} title={"All " + G.items.length + " corrected"} aria-label="All corrected"><Check size={16} /></button>
+                    <button className="act" onClick={() => G.items.forEach((g) => setMark(g, "ignored"))} title={"Ignore all " + G.items.length} aria-label="Ignore all"><Ban /></button>
+                  </span>
+                </div>
+                {open && <ol className="aq-items">{G.items.map((g) => row(g, true))}</ol>}
+              </li>
+            );
+          }); })()}
         </ol>
       )}
 

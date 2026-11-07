@@ -6,7 +6,7 @@ import { toolDir } from "../../library.js";
 export var lastError = { message: "" };
 // =================================================================== utils
 var req = nodeRequire;
-var fs = req("fs"), pathMod = req("path"), https = req("https"), http = req("http");
+var fs = req("fs"), pathMod = req("path");
 var Buffer = typeof globalThis.Buffer !== "undefined" ? globalThis.Buffer : req("buffer").Buffer;
 
 function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
@@ -90,27 +90,20 @@ var SEP = "\n\n";
 // Same length, so offsets still point at the original text.
 function normalize(t) { return t.replace(/[\r\n\t\u0003\u2028\u2029]/g, " "); }
 
+// The browser's fetch, not Node's https: Node network callbacks inside the panel can crash
+// Premiere's panel engine (CEPHtmlEngine).
 function postForm(url, params, timeoutMs) {
-  return new Promise(function (resolve, reject) {
-    var u = new URL(url);
-    var body = new URLSearchParams(params).toString();
-    var lib = u.protocol === "http:" ? http : https;
-    var rq = lib.request({
-      method: "POST", hostname: u.hostname, port: u.port || undefined, path: u.pathname + u.search,
-      headers: {
-        "Content-Type": "application/x-www-form-urlencoded",
-        "Content-Length": Buffer.byteLength(body), "Accept": "application/json",
-        "User-Agent": "Frameshift-TextQC"
-      }
-    }, function (res) {
-      var chunks = [];
-      res.on("data", function (c) { chunks.push(c); });
-      res.on("end", function () { resolve({ status: res.statusCode, body: Buffer.concat(chunks).toString("utf8") }); });
-    });
-    rq.on("error", reject);
-    rq.setTimeout(timeoutMs || 60000, function () { rq.destroy(new Error("Request timed out")); });
-    rq.write(body);
-    rq.end();
+  var ctl = typeof AbortController !== "undefined" ? new AbortController() : null;
+  var timer = setTimeout(function () { if (ctl) ctl.abort(); }, timeoutMs || 60000);
+  return fetch(url, {
+    method: "POST", signal: ctl ? ctl.signal : undefined,
+    headers: { "Content-Type": "application/x-www-form-urlencoded", "Accept": "application/json" },
+    body: new URLSearchParams(params).toString()
+  }).then(function (res) {
+    return res.text().then(function (body) { clearTimeout(timer); return { status: res.status, body: body }; });
+  }, function (e) {
+    clearTimeout(timer);
+    throw new Error(e && e.name === "AbortError" ? "Request timed out" : (e && e.message) || "Network error");
   });
 }
 

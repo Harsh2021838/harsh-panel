@@ -174,10 +174,13 @@
 
   function readFile(path) {
     if (nodeFs) {
+      // Frameshift: read synchronously. Node's async file callbacks inside the panel can crash
+      // Premiere's panel engine; a sync read is safe (and audio files are small).
       return new Promise(function (res, rej) {
-        nodeFs.readFile(path, function (err, buf) {
-          if (err) rej(err); else res(buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength));
-        });
+        setTimeout(function () {
+          try { var buf = nodeFs.readFileSync(path); res(buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength)); }
+          catch (err) { rej(err); }
+        }, 0);
       });
     }
     return new Promise(function (res, rej) {
@@ -2189,11 +2192,11 @@
   var IS_WIN = (function () { try { return window.require('os').platform() === 'win32'; } catch (e) { return /Win/.test(navigator.platform || ''); } })();
   function baseFile(p) { return String(p || '').split(/[\\\/]/).pop(); }
   function revealFile(p) {
-    try {
-      var cp = window.require('child_process');
-      if (IS_WIN) cp.exec('explorer /select,"' + p + '"'); else cp.exec('open -R "' + p.replace(/"/g, '\\"') + '"');
-    } catch (err) { setStatus(p); }
+    // Frameshift: opened by Premiere's script engine, not Node's child_process (Node callbacks
+    // inside the panel can crash Premiere's panel engine).
+    host('(function(){var f=new File(' + q(p) + ');if(f.exists){if(f.parent)f.parent.execute();return "OK";}return "missing";})()');
   }
+
 
   // Frameshift: no duplicates. The same file (or an identical copy under another name) can be in
   // SFX or full BGM once; BGM parts may come from one song, but not cover almost the same seconds.

@@ -581,3 +581,8 @@ input[type="checkbox"] { accent-color: var(--mark); margin: 0; width: 13px; heig
 .roles-line { margin-top: 2px; }
 .track-roles { display: flex; flex-direction: column; gap: 8px; padding: 8px 0; }
 .track-roles .track-name { min-width: 64px; font-weight: 600; color: var(--ink); }
+.aq-group { list-style: none; }
+.aq-group .aq-head .gap-pick { align-items: center; }
+.aq-count { flex: none; min-width: 26px; padding: 2px 7px; border-radius: 999px; background: var(--raise-2); color: var(--ink); font-size: 11.5px; text-align: center; }
+.aq-items { list-style: none; margin: 0 0 6px 30px; padding: 0; border-left: 1px solid var(--line); }
+.gap-row.sub .gap-pick { padding-top: 5px; padding-bottom: 5px; }
