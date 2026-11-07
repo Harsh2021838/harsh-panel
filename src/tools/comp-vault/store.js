@@ -387,12 +387,12 @@ module.exports = function createStore(opts) {
   // ---- whole-library search
   function listAll() { return listRecent(Infinity); }
   function placeLabel(sc) { return !sc.client ? "Common" : sc.project ? sc.client + " " + sc.project : sc.client; }
-  var KIND_WORDS = { animation: "animation comp", layers: "layers", image: "image logo screenshot", clip: "clip video" };
+  var KIND_WORDS = { animation: "animation comp", layers: "layers", image: "image logo screenshot", clip: "clip video audio", preset: "effects animation preset", ffx: "effects animation preset ffx", expression: "expression code", script: "script code jsx", font: "font type" };
   function search(q) {
     var words = String(q || "").toLowerCase().split(/\s+/).filter(Boolean);
     if (!words.length) return [];
     return listAll().filter(function (it) {
-      var hay = [it.name, placeLabel(it.scope), KIND_WORDS[it.kind] || "", (it.fonts || []).join(" "), it.source || "", (it.tags || []).join(" ")].join(" ").toLowerCase();
+      var hay = [it.name, placeLabel(it.scope), KIND_WORDS[it.kind] || "", (it.fonts || []).join(" "), (it.effects || []).join(" "), it.source || "", (it.tags || []).join(" ")].join(" ").toLowerCase();
       return words.every(function (w) { return hay.indexOf(w) !== -1; });
     });
   }

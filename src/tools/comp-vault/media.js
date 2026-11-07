@@ -40,9 +40,17 @@ function canvasToBuffer(canvas) {
 
 // size: { w, h, mode: "crop" | "tall" | "original" }
 // Returns { file, width, height, kind } written into dir.
+var SCRIPT = /\.(jsx|jsxbin|js)$/i, FONT = /\.(ttf|otf|ttc|otc|dfont)$/i, FFX = /\.ffx$/i;
 function addFile(deps, src, dir, size) {
   var fs = deps.fs, path = deps.path;
   var ext = path.extname(src).toLowerCase();
+  // Scripts, fonts and effect presets are kept as they are, under their own name.
+  var special = SCRIPT.test(src) ? "script" : FONT.test(src) ? "font" : FFX.test(src) ? "ffx" : "";
+  if (special) {
+    var keep = path.basename(src);
+    fs.copyFileSync(src, path.join(dir, keep));
+    return Promise.resolve({ file: keep, kind: special });
+  }
   var isImage = IMAGE.test(src);
   if (!isImage || !RESIZABLE.test(src) || !size || size.mode === "original") {
     var name = (isImage ? "image" : "media") + ext;
@@ -67,4 +75,4 @@ function addFile(deps, src, dir, size) {
   });
 }
 
-module.exports = { addFile: addFile, fileURL: fileURL, IMAGE: IMAGE };
+module.exports = { addFile: addFile, fileURL: fileURL, IMAGE: IMAGE, SCRIPT: SCRIPT, FONT: FONT, FFX: FFX };

@@ -299,3 +299,8 @@ button.hl-crumb:hover { background: var(--hl-raise-2); color: var(--hl-ink); }
 .hl-actions.is-select select { flex: 1.3 1 0; min-width: 0; height: 30px; }
 .hl-sel-n { flex: none; font-size: 11.5px; color: var(--hl-ink-2); }
 .hl-action.is-narrow { flex: 0 0 auto; }
+
+/* Frameshift: code, fonts */
+.hl-thumb-code { position: absolute; inset: 0; margin: 0; padding: 8px 10px; font: 10.5px/1.4 ui-monospace, Menlo, Consolas, monospace; color: #9fd3a5; background: #15181c; white-space: pre-wrap; overflow: hidden; text-align: left; }
+.hl-thumb-font { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 40px; color: var(--ink, #eee); background: #1b1d21; }
+.hl-code { max-height: 140px; overflow: auto; margin: 0; padding: 8px 10px; border-radius: 6px; font: 11px/1.45 ui-monospace, Menlo, Consolas, monospace; background: #15181c; color: #9fd3a5; white-space: pre-wrap; }

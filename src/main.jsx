@@ -15,7 +15,7 @@ import AudioQC from "./tools/audio-qc/AudioQC.jsx";
 import CompVault from "./tools/comp-vault/CompVault.jsx";
 import "./styles.css";
 
-const VERSION = "2.16.1";
+const VERSION = "2.17.0";
 
 // The four sections. Add a tool by putting it in a section's `tools` list
 // (or drop a plugin file into /plugins, see plugins/README.md).

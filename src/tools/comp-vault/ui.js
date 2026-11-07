@@ -14,10 +14,18 @@ var FILTERS = [
   { id: "all", label: "All" },
   { id: "animation", label: "Animations" },
   { id: "layers", label: "Layers" },
-  { id: "image", label: "Images" }
+  { id: "effects", label: "Effects" },
+  { id: "code", label: "Code" },
+  { id: "image", label: "Media" },
+  { id: "font", label: "Fonts" }
 ];
-var KIND_LABEL = { animation: "Animation", layers: "Layers", image: "Image", clip: "Clip" };
-var KIND_ICON = { animation: "film", layers: "layers", image: "image", clip: "clip" };
+// Which filter chip a kind belongs to.
+var FILTER_OF = { clip: "image", preset: "effects", ffx: "effects", expression: "code", script: "code" };
+function filterOf(kind) { return FILTER_OF[kind] || kind; }
+var KIND_LABEL = { animation: "Animation", layers: "Layers", image: "Image", clip: "Clip", preset: "Effects & Animation", ffx: "Effect preset", expression: "Expression", script: "Script", font: "Font" };
+var KIND_ICON = { animation: "film", layers: "layers", image: "image", clip: "clip", preset: "spark", ffx: "spark", expression: "code", script: "code", font: "type" };
+// Kinds that only make sense inside After Effects.
+var AE_ONLY = { preset: 1, ffx: 1, expression: 1, script: 1 };
 function fmtBytes(b) {
   var u = ["bytes", "KB", "MB", "GB", "TB"], i = 0;
   while (b >= 1000 && i < u.length - 1) { b /= 1000; i++; }
@@ -78,7 +86,10 @@ module.exports = function makeUI(React, deps) {
       gridL: "M2.5 2.5h5v5h-5Zm6 0h5v5h-5Zm-6 6h5v5h-5Zm6 0h5v5h-5Z",
       clip: "M2.5 4.5h8v7h-8Zm8 2.5 3-2v6l-3-2",
       check: "M3.5 8.5 6.5 11.5 12.5 4.5",
-      tag: "M2.5 2.5h5l6 6-5 5-6-6Zm3 2.2a.6.6 0 1 0 0 .1"
+      tag: "M2.5 2.5h5l6 6-5 5-6-6Zm3 2.2a.6.6 0 1 0 0 .1",
+      code: "M6 4.5 2.5 8 6 11.5M10 4.5 13.5 8 10 11.5",
+      spark: "M8 2v3.2M8 10.8V14M2 8h3.2M10.8 8H14M4 4l2.2 2.2M9.8 9.8 12 12M4 12l2.2-2.2M9.8 6.2 12 4",
+      type: "M3.5 5V3.5h9V5M8 3.5v9M6 12.5h4"
     }[props.name];
     var fill = props.name === "more";
     return h("svg", { width: props.size || 16, height: props.size || 16, viewBox: "0 0 16 16", "aria-hidden": "true", className: "hl-icon" },
@@ -128,15 +139,35 @@ module.exports = function makeUI(React, deps) {
     var src = frames.length ? frames[Math.min(idx, frames.length - 1)] : (item.kind === "image" ? item.filePath : null);
     var badge = item.kind === "animation" || item.kind === "layers" ? fmtTime(hot && frames.length ? item.duration * idx / Math.max(frames.length - 1, 1) : item.duration)
       : item.width ? item.width + "×" + item.height : "";
+    var fontFamily = useFontFace(item);
+    var body = src ? h("img", { src: media.fileURL(src, v), alt: "", width: 160, height: 90, draggable: false, loading: props.autoplay ? "eager" : "lazy" })
+      : item.kind === "expression" ? h("pre", { className: "hl-thumb-code" }, String(item.expression || "").slice(0, 220))
+      : item.kind === "font" ? h("span", { className: "hl-thumb-font", style: fontFamily ? { fontFamily: fontFamily } : null }, "Aa")
+      : h("span", { className: "hl-thumb-icon" }, h(Icon, { name: KIND_ICON[item.kind] || "film", size: 22 }));
     return h("span", { className: "hl-thumb" + (item.kind === "image" ? " is-image" : ""), ref: box, onPointerEnter: onEnter, onPointerLeave: onLeave, onPointerMove: onMove, onFocus: onEnter, onBlur: onLeave },
-      src ? h("img", { src: media.fileURL(src, v), alt: "", width: 160, height: 90, draggable: false, loading: props.autoplay ? "eager" : "lazy" })
-        : h("span", { className: "hl-thumb-icon" }, h(Icon, { name: item.kind === "layers" ? "layers" : "film", size: 22 })),
+      body,
       hot && frames.length > 1 ? h("span", { className: "hl-playhead", style: { left: (idx / (frames.length - 1)) * 100 + "%" } }) : null,
       badge ? h("span", { className: "hl-badge num" }, badge) : null);
   }
 
+  // A saved font previews in itself.
+  var loadedFonts = {};
+  function useFontFace(item) {
+    var fam = item.kind === "font" && item.filePath ? "hlfont_" + String(item.dir).replace(/[^a-z0-9]/gi, "").slice(-24) : "";
+    var _a = useState(fam && loadedFonts[fam] ? fam : ""), ready = _a[0], setReady = _a[1];
+    useEffect(function () {
+      if (!fam || loadedFonts[fam] || typeof FontFace === "undefined") return;
+      try {
+        var bytes = fs.readFileSync(item.filePath);
+        var ff = new FontFace(fam, bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength));
+        ff.load().then(function (f) { document.fonts.add(f); loadedFonts[fam] = true; setReady(fam); }, function () {});
+      } catch (e) {}
+    }, [fam]);
+    return ready;
+  }
+
   // ---------------------------------------------------------------- item card
-  function blockedIn(item) { return !isAE && (item.kind === "animation" || item.kind === "layers") && !item.aepPath && !item.videoPath; }
+  function blockedIn(item) { return !isAE && ((item.kind === "animation" || item.kind === "layers") && !item.aepPath && !item.videoPath || !!AE_ONLY[item.kind]); }
   var ADD_LABEL = isAE ? "Add to Comp" : "Add to Sequence";
   function Card(props) {
     var item = props.item;
@@ -156,7 +187,7 @@ module.exports = function makeUI(React, deps) {
         }, h(Thumb, { item: item })),
         selecting ? h("span", { className: "hl-check", "aria-hidden": "true" }, selected ? h(Icon, { name: "check", size: 13 }) : null) : null,
         !blocked && !selecting ? h("button", { type: "button", className: "hl-card-add", onClick: function () { props.onInsert(item); }, "aria-label": ADD_LABEL + ": " + item.name },
-          h(Icon, { name: "add", size: 13 }), h("span", null, "Add")) : null,
+          h(Icon, { name: AE_ONLY[item.kind] ? "spark" : item.kind === "font" ? "type" : "add", size: 13 }), h("span", null, item.kind === "script" ? "Run" : AE_ONLY[item.kind] ? "Apply" : item.kind === "font" ? "Install" : "Add")) : null,
         item.pinned ? h("span", { className: "hl-pin", title: "Pinned to Home" }, h(Icon, { name: "pin", size: 12 })) : null),
       h("div", { className: "hl-card-meta" },
         h("span", { className: "hl-card-type", title: KIND_LABEL[item.kind] }, h(Icon, { name: KIND_ICON[item.kind] || "file", size: 13 })),
@@ -264,22 +295,26 @@ module.exports = function makeUI(React, deps) {
   function SaveSheet(props) {
     var info = props.info || {};
     var comp = info.comp;
-    var _a = useState(props.kind === "layers" ? "" : comp ? comp.name : ""), name = _a[0], setName = _a[1];
+    var _a = useState(props.kind === "layers" || props.kind === "preset" ? "" : comp ? comp.name : ""), name = _a[0], setName = _a[1];
+    var _f = useState(readPref("still", "0") === "1"), still = _f[0], setStill = _f[1];
     var _b = useState(props.scope), to = _b[0], setTo = _b[1];
     var _c = useState(false), video = _c[0], setVideo = _c[1];
     var _d = useState(false), busy = _d[0], setBusy = _d[1];
     var _e = useState(""), err = _e[0], setErr = _e[1];
-    var what = props.kind === "layers"
+    var what = props.kind === "preset"
+      ? (info.selectedLayers ? "The effects and animation of the first selected layer in " + comp.name + ". Apply them to any layer later." : "Select the layer whose effects and animation you want to save.")
+      : props.kind === "layers"
       ? (info.selectedLayers ? info.selectedLayers + (info.selectedLayers === 1 ? " layer" : " layers") + " from " + comp.name : "Select layers in the timeline first.")
       : (comp ? comp.name + ", " + comp.width + "×" + comp.height + ", " + fmtTime(comp.duration) : "Open a comp, or select one in the Project panel.");
-    var ready = props.kind === "layers" ? info.selectedLayers > 0 : !!comp;
+    var ready = props.kind === "layers" || props.kind === "preset" ? info.selectedLayers > 0 : !!comp;
 
     function submit() {
       var n = store.cleanName(name);
       if (!n) return setErr("Type a name, like “Subscribe button”.");
       setBusy(true); setErr("");
       var dir = store.newItem(to, n);
-      call("saveItem", { kind: props.kind, dir: dir, name: n, video: props.kind === "animation" && video }).then(function (r) {
+      writePref("still", still ? "1" : "0");
+      call("saveItem", { kind: props.kind, dir: dir, name: n, video: props.kind === "animation" && video, still: still }).then(function (r) {
         store.saveItem(dir, Object.assign({ kind: props.kind, name: n, aep: "item.aep" }, r));
         props.onDone(n, to, Object.assign({ wantedVideo: props.kind === "animation" && video }, r));
       }, function (e) {
@@ -288,13 +323,16 @@ module.exports = function makeUI(React, deps) {
       });
     }
     return h(Sheet, {
-      title: props.kind === "layers" ? "Save Layers" : "Save Comp", submit: props.kind === "layers" ? "Save Layers" : "Save Comp",
+      title: props.kind === "preset" ? "Save Effects & Animation" : props.kind === "layers" ? "Save Layers" : "Save Comp", submit: props.kind === "preset" ? "Save" : props.kind === "layers" ? "Save Layers" : "Save Comp",
       busy: busy, busyLabel: "Saving…", disabled: !ready, error: err, onClose: props.onClose, onSubmit: submit
     },
-      busy ? h(Progress, { title: "Saving " + name, steps: ["Saving your project", "Copying the comp and every file it uses", "Rendering the hover preview" + (props.kind === "animation" && video ? " and the Premiere video" : ""), "Reopening your project"] }) : null,
+      busy ? h(Progress, { title: "Saving " + name, steps: ["Saving your project", "Copying the comp and every file and font it uses", (still ? "Saving a still frame" : "Rendering the hover preview") + (props.kind === "animation" && video ? " and the Premiere video" : ""), "Reopening your project"] }) : null,
       busy ? null : h("p", { className: "hl-what" + (ready ? "" : " is-warn") }, what),
       busy ? null : h(Field, { label: "Name" }, h("input", { value: name, onChange: function (e) { setName(e.target.value); }, placeholder: "Subscribe button…", autoFocus: true, autoComplete: "off", spellCheck: false, name: "item-name" })),
       busy ? null : h(ScopeSelect, { scopes: props.scopes, value: to, onChange: setTo }),
+      busy ? null : h(Field, { label: "Preview" }, h("div", { className: "seg", role: "radiogroup", "aria-label": "Preview" },
+        h("button", { type: "button", role: "radio", "aria-checked": !still, className: !still ? "on" : "", onClick: function () { setStill(false); } }, "Plays on hover"),
+        h("button", { type: "button", role: "radio", "aria-checked": still, className: still ? "on" : "", onClick: function () { setStill(true); } }, "Still frame (faster)"))),
       !busy && props.kind === "animation" ? h("label", { className: "check-inline" }, h("input", { type: "checkbox", checked: video, onChange: function (e) { setVideo(e.target.checked); } }), "Also make a video for Premiere (only needed if Dynamic Link isn’t available)") : null,
       busy ? null : h("p", { className: "help" }, "Your project is saved first. The library keeps its own copy of every file this uses, so you can delete the original project later."));
   }
@@ -359,6 +397,23 @@ module.exports = function makeUI(React, deps) {
       anyImage && sizeId !== "original" ? h("p", { className: "help" }, mode === "crop"
         ? "Fills the size exactly. Tall website shots keep the top of the page."
         : "Width is fixed, height follows the image. Good for scrolling website shots.") : null,
+      h(ScopeSelect, { scopes: props.scopes, value: to, onChange: setTo }));
+  }
+
+  function ExpressionSheet(props) {
+    var _a = useState(props.expr.prop + " expression"), name = _a[0], setName = _a[1];
+    var _b = useState(props.scope), to = _b[0], setTo = _b[1];
+    var _c = useState(""), err = _c[0], setErr = _c[1];
+    function submit() {
+      var n = store.cleanName(name);
+      if (!n) return setErr("Type a name, like \u201CWiggle 2 per second\u201D.");
+      var dir = store.newItem(to, n);
+      store.saveItem(dir, { kind: "expression", name: n, expression: props.expr.expression, prop: props.expr.prop, matchName: props.expr.matchName });
+      props.onDone(n, to);
+    }
+    return h(Sheet, { title: "Save Expression", submit: "Save Expression", error: err, onClose: props.onClose, onSubmit: submit },
+      h("pre", { className: "hl-code" }, props.expr.expression),
+      h(Field, { label: "Name" }, h("input", { value: name, onChange: function (e) { setName(e.target.value); }, autoFocus: true, autoComplete: "off", spellCheck: false, name: "expr-name" })),
       h(ScopeSelect, { scopes: props.scopes, value: to, onChange: setTo }));
   }
 
@@ -899,7 +954,7 @@ module.exports = function makeUI(React, deps) {
 
     useEffect(function () { setFilter("all"); setQuery(""); setTagFilter(""); setSelected(null); }, [scopeKey(scope || {})]);
     var shown = data.items.filter(function (it) {
-      if (filter !== "all" && !(it.kind === filter || (filter === "image" && it.kind === "clip"))) return false;
+      if (filter !== "all" && filterOf(it.kind) !== filter) return false;
       if (tagFilter && !(it.tags || []).some(function (t) { return t.toLowerCase() === tagFilter.toLowerCase(); })) return false;
       if (!query) return true;
       var q = query.toLowerCase();
@@ -921,6 +976,23 @@ module.exports = function makeUI(React, deps) {
     }
     function insert(item, changes, opts) {
       var p, at = opts && opts.at !== undefined ? opts.at : null;
+      var special = insertSpecial(item);
+      if (special) {
+        if (opts && opts.quiet) return special;
+        special.then(function (msg) { say(msg); }, function (e) { say(e.message, { error: true }); });
+        return special;
+      }
+      if (isAE && (item.kind === "animation" || item.kind === "layers") && item.fonts && item.fonts.length && !(opts && opts.fontsChecked)) {
+        var checked = ensureFonts(item).then(function (note) {
+          var q = insert(item, changes, Object.assign({}, opts || {}, { fontsChecked: true, quiet: true }));
+          if (opts && opts.quiet) return q;
+          q.then(function (r) {
+            say((r && r.into ? "Added " + item.name + " to " + r.into : "Added " + item.name + " to the project") + (changes ? " with your changes" : "") + (note ? ". " + note : ""), note && /missing/i.test(note) ? { error: true } : null);
+          }, function (e) { say(e.message, { error: true }); });
+          return q;
+        });
+        return checked;
+      }
       if (isAE) {
         if (item.kind === "animation" || item.kind === "layers") p = call("insertItem", { aep: item.aepPath, compName: item.compName, name: item.name, kind: item.kind, texts: changes ? changes.texts : null, colors: changes ? changes.colors : null, at: at });
         else p = call("importFile", { path: item.filePath, name: item.name, at: at });
@@ -940,6 +1012,58 @@ module.exports = function makeUI(React, deps) {
         say((r && r.into ? "Added " + item.name + " to " + r.into + (r.track ? ", " + r.track : "") : "Added " + item.name + " to the project") + (changes ? " with your changes" : ""));
       }, function (e) { say(e.message, { error: true }); });
       return p;
+    }
+    // Effects & animation, expressions, scripts, .ffx presets and fonts: applied, not inserted.
+    function insertSpecial(item) {
+      var k = item.kind;
+      if (k === "font") return Promise.resolve().then(function () { return installFonts([{ name: item.name, path: item.filePath }]); });
+      if (!AE_ONLY[k]) return null;
+      if (!isAE) return Promise.reject(new Error(KIND_LABEL[k] + " only works in After Effects."));
+      var p = k === "preset" ? call("applyPreset", { aep: item.aepPath, compName: item.compName, name: item.name })
+        : k === "ffx" ? call("applyFfx", { path: item.filePath, name: item.name })
+        : k === "expression" ? call("applyExpression", { expression: item.expression, name: item.name })
+        : call("runScript", { path: item.filePath });
+      return p.then(function (r) {
+        try { store.touch && store.touch(item.dir); } catch (e) {}
+        if (k === "script") return "Ran " + item.name;
+        return "Applied " + item.name + " to " + plural(r.applied, k === "expression" ? "property" : "layer", k === "expression" ? "properties" : "layers") + (r.into ? " in " + r.into : "");
+      });
+    }
+    // Fonts the item needs that this computer doesn't have: install the copies saved with it.
+    function ensureFonts(item) {
+      return call("checkFonts", { names: item.fonts }).then(function (r) {
+        if (!r.known || !r.missing.length) return "";
+        var files = (item.fontFiles || []).filter(function (f) { return r.missing.indexOf(f.name) !== -1; })
+          .map(function (f) { return { name: f.name, path: path.join(item.dir, f.file) }; })
+          .filter(function (f) { return fs.existsSync(f.path); });
+        var have = files.map(function (f) { return f.name; });
+        var still = r.missing.filter(function (n) { return have.indexOf(n) === -1; });
+        var note = files.length ? installFonts(files) : "";
+        if (still.length) note += (note ? " " : "") + "Missing fonts: " + still.join(", ") + ". Install them before rendering.";
+        return note;
+      }, function () { return ""; });
+    }
+    // Copies font files into the user's own font folder (no admin needed).
+    function installFonts(files) {
+      var os = window.require ? window.require("os") : null;
+      var home = os ? os.homedir() : "";
+      var mac = !os || os.platform() === "darwin";
+      if (!mac) {
+        files.forEach(function (f) { deps.openFolder(path.dirname(f.path)); });
+        return "Opened the font" + (files.length === 1 ? "" : "s") + ": double-click to install " + files.map(function (f) { return f.name; }).join(", ") + ".";
+      }
+      var dest = path.join(home, "Library", "Fonts"), done = [];
+      fs.mkdirSync(dest, { recursive: true });
+      files.forEach(function (f) {
+        var to = path.join(dest, path.basename(f.path));
+        if (!fs.existsSync(to)) fs.copyFileSync(f.path, to);
+        done.push(f.name);
+      });
+      return "Installed " + done.join(", ") + (done.length ? ". If it doesn\u2019t show yet, restart " + (isAE ? "After Effects" : "Premiere") + "." : "");
+    }
+    // Saves the expression on the selected property.
+    function saveExpression() {
+      call("readExpression").then(function (r) { setSheet({ type: "expression", expr: r }); }, function (e) { say(e.message, { error: true }); });
     }
     // Several at once: one after another (each starts where the last ends) or all at the playhead.
     function insertMany(items, mode) {
@@ -977,7 +1101,7 @@ module.exports = function makeUI(React, deps) {
       setMenu({
         pos: r.bottom + 260 > window.innerHeight ? { bottom: host.bottom - r.top + 2, right: host.right - r.right } : { top: r.bottom - host.top + 2, right: host.right - r.right },
         items: [
-          { label: ADD_LABEL, run: function () { insert(item); } },
+          { label: item.kind === "script" ? "Run Script" : AE_ONLY[item.kind] ? "Apply to Selected" : item.kind === "font" ? "Install Font" : ADD_LABEL, run: function () { insert(item); } },
           { label: "Details", run: function () { openDetails(item); } },
           { label: "Select", run: function () { setSelected([item]); } },
           { label: item.pinned ? "Unpin from Home" : "Pin to Home", run: function () { togglePin(item); } },
@@ -1042,7 +1166,9 @@ module.exports = function makeUI(React, deps) {
       setMenu({
         pos: { bottom: host.bottom - r.top + 4, right: host.right - r.right },
         items: [
-          { label: "Logos, Screenshots or Clips…", run: chooseFiles },
+          { label: "Effects & Animation of Selected Layer…", run: function () { openSave("preset"); } },
+          { label: "Expression of Selected Property…", run: saveExpression },
+          { label: "Logos, Clips, Fonts, Scripts or .ffx…", run: chooseFiles },
           { label: "Comps from a Project File…", run: function () { openProjectFile(); } }
         ]
       });
@@ -1153,7 +1279,7 @@ module.exports = function makeUI(React, deps) {
     function ScopeView() {
       var empty = !data.items.length;
       var counts = { all: data.items.length };
-      data.items.forEach(function (it) { var k = it.kind === "clip" ? "image" : it.kind; counts[k] = (counts[k] || 0) + 1; });
+      data.items.forEach(function (it) { var k = filterOf(it.kind); counts[k] = (counts[k] || 0) + 1; });
       var chips = FILTERS.filter(function (f) { return f.id === "all" || counts[f.id]; });
       var tagCount = {}, tagLabel = {};
       data.items.forEach(function (it) { (it.tags || []).forEach(function (t) { var k = t.toLowerCase(); tagLabel[k] = tagLabel[k] || t; tagCount[k] = (tagCount[k] || 0) + 1; }); });
@@ -1229,6 +1355,10 @@ module.exports = function makeUI(React, deps) {
           closeSheet(); setScope(to); refresh();
           say("Added " + n + (n === 1 ? " file" : " files") + " to " + scopeLabel(to) + (notes.length ? ". " + notes.join(". ") + "." : ""), notes.length ? { error: true } : null);
         }
+      });
+      if (sheet.type === "expression") sheetEl = h(ExpressionSheet, {
+        expr: sheet.expr, scope: here, scopes: scopes, onClose: closeSheet,
+        onDone: function (n, to) { closeSheet(); setScope(to); refresh(); say("Saved the expression " + n + " to " + scopeLabel(to) + ". Select properties and click it to apply."); }
       });
       if (sheet.type === "color") sheetEl = h(ColorSheet, { scope: paletteScope, onClose: closeSheet, onDone: function () { closeSheet(); refresh(); } });
       if (sheet.type === "client") sheetEl = h(NameSheet, {

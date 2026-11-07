@@ -58,6 +58,7 @@
         if (comp && comp instanceof CompItem) {
             out.comp = { id: comp.id, name: comp.name, width: comp.width, height: comp.height, duration: comp.duration, fps: comp.frameRate };
             out.selectedLayers = comp.selectedLayers.length;
+            try { out.selectedProps = comp.selectedProperties.length; } catch (eP) { out.selectedProps = 0; }
         } else {
             out.selectedLayers = 0;
             var sel = p ? p.selection : [];
@@ -149,9 +150,20 @@
     }
 
     // Small PNG flipbook for hover previews. Returns number of frames written.
-    function renderFrames(comp, dir) {
+    // still: one frame from the middle, for a quick save; otherwise up to 48 frames for the hover preview.
+    function renderFrames(comp, dir, still) {
         var W = 360, H = Math.max(2, Math.round(W * comp.height / comp.width / 2) * 2);
         var maxFrames = 48, fps = Math.max(1, Math.min(12, maxFrames / Math.max(comp.duration, 0.1)));
+        if (still) {
+            var f1 = ensureFolder(dir + "/preview");
+            var pv1 = app.project.items.addComp("__harsh_preview", W, H, 1, comp.duration, comp.frameRate);
+            var l1 = pv1.layers.add(comp), s1 = 100 * W / comp.width;
+            l1.property("ADBE Transform Group").property("ADBE Scale").setValue([s1, s1]);
+            var ok = 0;
+            try { pv1.saveFrameToPng(comp.duration / 2, new File(f1.fsName + "/f_000.png")); ok = 1; } catch (eS) {}
+            pv1.remove();
+            if (ok) return 1;
+        }
         var pv = app.project.items.addComp("__harsh_preview", W, H, 1, comp.duration, fps);
         var lay = pv.layers.add(comp);
         var s = 100 * W / comp.width;
@@ -189,19 +201,207 @@
         return out.exists ? "video.mp4" : "";
     }
 
-    // a: { kind: "animation" | "layers", dir, name, video: bool }
+
+    // ------------------------------------------------------------ fonts
+    // Copies the font files the text layers use next to the item (AE 24+ knows where fonts are).
+    function collectFonts(dir) {
+        var out = [];
+        try {
+            if (!app.fonts || !app.fonts.getFontsByPostScriptName) return out;
+            var names = fontsUsed(), dest = null;
+            for (var i = 0; i < names.length; i++) {
+                var list = app.fonts.getFontsByPostScriptName(names[i]);
+                if (!list || !list.length) continue;
+                var loc = list[0].location;
+                if (!loc) continue;
+                var f = new File(loc);
+                if (!f.exists) continue;
+                if (!dest) dest = ensureFolder(dir + "/Fonts");
+                var to = new File(dest.fsName + "/" + f.name);
+                if (!to.exists) f.copy(to);
+                out.push({ name: names[i], file: "Fonts/" + f.name });
+            }
+        } catch (e) {}
+        return out;
+    }
+    // a: { names } -> { missing: [...], known: bool }
+    api.checkFonts = function (a) {
+        var miss = [];
+        if (!app.fonts || !app.fonts.getFontsByPostScriptName) return { missing: [], known: false };
+        for (var i = 0; i < (a.names || []).length; i++) {
+            var list = null;
+            try { list = app.fonts.getFontsByPostScriptName(a.names[i]); } catch (e) {}
+            if (!list || !list.length) miss.push(a.names[i]);
+        }
+        return { missing: miss, known: true };
+    };
+
+    // ------------------------------------------------------------ effects & animation
+    function effectNames(layer) {
+        var out = [], fx = layer.property("ADBE Effect Parade");
+        for (var i = 1; fx && i <= fx.numProperties; i++) out.push(fx.property(i).name);
+        return out;
+    }
+    function copyValueAndKeys(src, dst, shift) {
+        if (src.propertyValueType === PropertyValueType.NO_VALUE || src.propertyValueType === PropertyValueType.CUSTOM_VALUE) return;
+        try { if (src.canSetExpression && src.expression && src.expressionEnabled) { dst.expression = src.expression; } } catch (e0) {}
+        if (src.numKeys > 0) {
+            try { while (dst.numKeys) dst.removeKey(dst.numKeys); } catch (e1) {}
+            for (var k = 1; k <= src.numKeys; k++) {
+                var t = src.keyTime(k) + shift, v = src.keyValue(k);
+                try {
+                    var idx = dst.addKey(t);
+                    dst.setValueAtKey(idx, v);
+                    try { dst.setTemporalEaseAtKey(idx, src.keyInTemporalEase(k), src.keyOutTemporalEase(k)); } catch (e2) {}
+                    try { dst.setInterpolationTypeAtKey(idx, src.keyInInterpolationType(k), src.keyOutInterpolationType(k)); } catch (e3) {}
+                    if (src.isSpatial) { try { dst.setSpatialTangentsAtKey(idx, src.keyInSpatialTangent(k), src.keyOutSpatialTangent(k)); } catch (e4) {} }
+                } catch (e5) {}
+            }
+        } else {
+            try { dst.setValue(src.value); } catch (e6) {}
+        }
+    }
+    // Copy a group property by property (match names line them up).
+    function copyGroup(src, dst, shift, onlyAnimated) {
+        for (var i = 1; i <= src.numProperties; i++) {
+            var sp = src.property(i), dp = null;
+            try { dp = dst.property(sp.matchName); } catch (e) {}
+            if (!dp) continue;
+            if (sp.propertyType === PropertyType.PROPERTY) {
+                if (onlyAnimated && !(sp.numKeys > 0 || (sp.canSetExpression && sp.expression))) continue;
+                copyValueAndKeys(sp, dp, shift);
+            } else copyGroup(sp, dp, shift, onlyAnimated);
+        }
+    }
+    // a: { aep, compName, name } -> applies the saved layer's effects and animation to the selected layers.
+    api.applyPreset = function (a) {
+        var target = app.project.activeItem;
+        if (!(target instanceof CompItem) || !target.selectedLayers.length) fail("Select the layers to apply " + a.name + " to.");
+        var f = new File(a.aep);
+        if (!f.exists) fail("The library file is missing: " + a.aep);
+        var layers = [];
+        for (var s = 0; s < target.selectedLayers.length; s++) layers.push(target.selectedLayers[s]);
+        app.beginUndoGroup("Comp Vault: apply " + a.name);
+        var imported = null;
+        try {
+            imported = app.project.importFile(new ImportOptions(f));
+            var comp = findComp(imported, a.compName);
+            if (!comp || !comp.numLayers) fail("Couldn't find the saved layer inside the item.");
+            var src = comp.layer(1), applied = 0;
+            for (var i = 0; i < layers.length; i++) {
+                var L = layers[i];
+                // keyframes start where the playhead is, like dropping in a preset
+                var first = 1e9, groups = ["ADBE Transform Group", "ADBE Effect Parade", "ADBE Text Properties", "ADBE Layer Styles"];
+                for (var g = 0; g < groups.length; g++) first = Math.min(first, firstKey(src.property(groups[g])));
+                var shift = first < 1e9 ? target.time - first : 0;
+                var fxS = src.property("ADBE Effect Parade"), fxD = L.property("ADBE Effect Parade");
+                for (var e = 1; fxS && e <= fxS.numProperties; e++) {
+                    var se = fxS.property(e), de = null;
+                    try { if (fxD.canAddProperty(se.matchName)) de = fxD.addProperty(se.matchName); } catch (eA) {}
+                    if (!de) continue;
+                    try { de.name = se.name; } catch (eN) {}
+                    copyGroup(se, de, shift, false);
+                }
+                copyGroup(src.property("ADBE Transform Group"), L.property("ADBE Transform Group"), shift, true);
+                if (src instanceof TextLayer && L instanceof TextLayer) {
+                    try {
+                        var an = src.property("ADBE Text Properties").property("ADBE Text Animators"), dn = L.property("ADBE Text Properties").property("ADBE Text Animators");
+                        for (var t = 1; t <= an.numProperties; t++) {
+                            var na = dn.addProperty("ADBE Text Animator");
+                            copyAnimator(an.property(t), na, shift);
+                        }
+                    } catch (eT) {}
+                }
+                applied++;
+            }
+            return { applied: applied, into: target.name };
+        } finally {
+            if (imported) { try { imported.remove(); } catch (eR) {} }
+            app.endUndoGroup();
+        }
+    };
+    function firstKey(group) {
+        var m = 1e9;
+        if (!group) return m;
+        for (var i = 1; i <= group.numProperties; i++) {
+            var p = group.property(i);
+            if (p.propertyType === PropertyType.PROPERTY) { if (p.numKeys > 0) m = Math.min(m, p.keyTime(1)); }
+            else m = Math.min(m, firstKey(p));
+        }
+        return m;
+    }
+    function copyAnimator(src, dst, shift) {
+        try { dst.name = src.name; } catch (e) {}
+        var sels = src.property("ADBE Text Selectors"), dsel = dst.property("ADBE Text Selectors");
+        for (var i = 1; sels && i <= sels.numProperties; i++) {
+            var ns = null;
+            try { ns = dsel.addProperty(sels.property(i).matchName); } catch (e1) {}
+            if (ns) copyGroup(sels.property(i), ns, shift, false);
+        }
+        var props = src.property("ADBE Text Animator Properties"), dprops = dst.property("ADBE Text Animator Properties");
+        for (var j = 1; props && j <= props.numProperties; j++) {
+            var np = null;
+            try { np = dprops.addProperty(props.property(j).matchName); } catch (e2) {}
+            if (np) copyValueAndKeys(props.property(j), np, shift);
+        }
+    }
+
+    // ------------------------------------------------------------ expressions, scripts, .ffx
+    api.readExpression = function () {
+        var c = app.project ? app.project.activeItem : null;
+        if (!(c instanceof CompItem)) fail("Open a comp and select the property with the expression.");
+        var props = c.selectedProperties;
+        for (var i = 0; i < props.length; i++) {
+            var p = props[i];
+            try { if (p.propertyType === PropertyType.PROPERTY && p.canSetExpression && p.expression) return { expression: p.expression, prop: p.name, matchName: p.matchName }; } catch (e) {}
+        }
+        fail("Select a property that has an expression (twirl it open and click its name).");
+    };
+    api.applyExpression = function (a) {
+        var c = app.project ? app.project.activeItem : null;
+        if (!(c instanceof CompItem)) fail("Open a comp and select the properties to put the expression on.");
+        var props = c.selectedProperties, n = 0;
+        app.beginUndoGroup("Comp Vault: expression " + (a.name || ""));
+        try {
+            for (var i = 0; i < props.length; i++) {
+                var p = props[i];
+                try { if (p.propertyType === PropertyType.PROPERTY && p.canSetExpression) { p.expression = a.expression; p.expressionEnabled = true; n++; } } catch (e) {}
+            }
+        } finally { app.endUndoGroup(); }
+        if (!n) fail("Select the properties to put the expression on (twirl a layer open and click e.g. Position).");
+        return { applied: n, into: c.name };
+    };
+    api.runScript = function (a) {
+        var f = new File(a.path);
+        if (!f.exists) fail("The script is missing: " + a.path);
+        $.evalFile(f);
+        return { ran: f.name };
+    };
+    api.applyFfx = function (a) {
+        var c = app.project ? app.project.activeItem : null;
+        if (!(c instanceof CompItem) || !c.selectedLayers.length) fail("Select the layers to apply " + (a.name || "the preset") + " to.");
+        var f = new File(a.path), n = 0, layers = [];
+        if (!f.exists) fail("The preset is missing: " + a.path);
+        for (var s = 0; s < c.selectedLayers.length; s++) layers.push(c.selectedLayers[s]);
+        app.beginUndoGroup("Comp Vault: preset " + (a.name || ""));
+        try { for (var i = 0; i < layers.length; i++) { try { layers[i].applyPreset(f); n++; } catch (e) {} } }
+        finally { app.endUndoGroup(); }
+        return { applied: n, into: c.name };
+    };
+
+    // a: { kind: "animation" | "layers" | "preset", dir, name, video: bool, still: bool }
     api.saveItem = function (a) {
         var p = app.project;
         if (!p) fail("Open a project first.");
         if (!p.file) fail("Save your project once (File > Save), then save to the library.");
         var info = api.info();
         if (!info.comp) fail(a.kind === "layers" ? "Open a comp and select the layers to save." : "Open the comp you want to save, or select it in the Project panel.");
-        if (a.kind === "layers" && !info.selectedLayers) fail("Select the layers you want to save in the timeline.");
+        if ((a.kind === "layers" || a.kind === "preset") && !info.selectedLayers) fail(a.kind === "preset" ? "Select the layer whose effects and animation you want to save." : "Select the layers you want to save in the timeline.");
 
         var origFile = p.file, compId = info.comp.id, layerIdx = [];
-        if (a.kind === "layers") {
+        if (a.kind === "layers" || a.kind === "preset") {
             var sl = p.activeItem.selectedLayers;
-            for (var i = 0; i < sl.length; i++) layerIdx.push(sl[i].index);
+            for (var i = 0; i < (a.kind === "preset" ? 1 : sl.length); i++) layerIdx.push(sl[i].index);
             layerIdx.sort(function (x, y) { return x - y; });
         }
 
@@ -220,7 +420,7 @@
     // (or a new comp made of the chosen layers), copy its files in, render previews.
     function buildCopy(src, layerIdx, a) {
         var p = app.project, target = src;
-        if (layerIdx && layerIdx.length && layerIdx.length < src.numLayers) {
+        if (layerIdx && layerIdx.length && (layerIdx.length < src.numLayers || a.kind === "preset")) {
             target = p.items.addComp(a.name, src.width, src.height, src.pixelAspect, src.duration, src.frameRate);
             for (var j = layerIdx.length - 1; j >= 0; j--) src.layer(layerIdx[j]).copyToComp(target);
         }
@@ -228,13 +428,15 @@
         p.reduceProject([target]);
         skipOtherRenders();
         var col = collectFootage(a.dir);
-        var frames = 0, video = "";
-        try { frames = renderFrames(target, a.dir); } catch (eF) {}
+        var fontFiles = collectFonts(a.dir);
+        var frames = 0, video = "", fx = [];
+        if (a.kind === "preset") { try { fx = effectNames(target.layer(1)); } catch (eX) {} }
+        try { frames = renderFrames(target, a.dir, a.still); } catch (eF) {}
         if (a.video) { try { video = renderVideo(target, a.dir); } catch (eV) {} }
         var result = {
             compName: target.name, width: target.width, height: target.height,
             duration: target.duration, fps: target.frameRate, layers: target.numLayers,
-            missing: col.missing, copied: col.copied, fonts: fontsUsed(), frames: frames, video: video
+            missing: col.missing, copied: col.copied, fonts: fontsUsed(), fontFiles: fontFiles, frames: frames, video: video, effects: fx
         };
         p.save();
         return result;
