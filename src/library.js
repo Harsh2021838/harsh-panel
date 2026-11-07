@@ -50,6 +50,7 @@ export async function libraryDir() {
     } catch (e) { console.error("Frameshift: renaming Harsh Library", e); }
   }
   ensure(root);
+  keepOldPathsWorking(root);
   ensure(path.join(root, "Clients"));
   ["Assets", "SFX", "Compositions"].forEach((k) => ensure(path.join(root, "Common", k)));
   ensure(path.join(root, "Tools"));
@@ -66,6 +67,35 @@ export async function libraryDir() {
   } catch (e) {}
   return root;
 }
+// Projects saved before a folder moved still point at the old place: the "Harsh Library" rename
+// (2.15) and Comp Vault moving its items into Tools/Comp Vault. Leave a link at each old place
+// pointing to the new one, so Premiere and After Effects find every file where they expect it
+// and nothing goes offline. (A link takes no space; deleting it never deletes the real files.)
+function linkDir(target, at) {
+  try {
+    if (fs.existsSync(at) || !fs.existsSync(target)) return;
+    try { if (fs.lstatSync(at)) return; } catch (e) {} // a broken link already there: leave it
+    ensure(path.dirname(at));
+    fs.symlinkSync(target, at, nodeRequire("os").platform() === "win32" ? "junction" : "dir");
+  } catch (e) { console.error("Frameshift: link", at, e); }
+}
+function keepOldPathsWorking(root) {
+  if (path.basename(root) === "Frameshift Library") linkDir(root, path.join(path.dirname(root), "Harsh Library"));
+  try {
+    const vault = path.join(root, "Tools", "Comp Vault"), marker = path.join(vault, ".moved");
+    if (!fs.existsSync(marker)) return;
+    const m = JSON.parse(fs.readFileSync(marker, "utf8"));
+    let from = m.from || root;
+    if (!fs.existsSync(from) && /Harsh Library$/.test(from)) from = from.replace(/Harsh Library$/, "Frameshift Library");
+    for (const to of m.moved || []) {
+      const rel = path.relative(vault, to);
+      if (!rel || rel.startsWith("..")) continue;
+      const stat = fs.existsSync(to) && fs.statSync(to);
+      if (stat && stat.isDirectory()) linkDir(to, path.join(from, rel));
+    }
+  } catch (e) { console.error("Frameshift: old Comp Vault paths", e); }
+}
+
 export function setLibraryDir(dir) {
   try { localStorage.setItem(LS, dir); } catch (e) {}
   root = null;

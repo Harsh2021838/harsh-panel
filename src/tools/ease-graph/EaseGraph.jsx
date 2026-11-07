@@ -6,6 +6,8 @@
 //   - the selection check (every 1.5 s) only runs while this tool is on screen and Premiere isn't
 //     busy with another command, and every timer stops when you leave the tool.
 import { useEffect, useRef, useState } from "react";
+import { followSize } from "../../density.js";
+import SizeSwitch from "../SizeSwitch.jsx";
 import { extensionPath, evalRaw, hostBusy } from "../../host.js";
 import easeSrc from "./vendor/ease.js.txt";
 import bridgeSrc from "./vendor/host-bridge.js.txt";
@@ -99,6 +101,25 @@ const LOOK = `
 .eg-body .how{display:grid;grid-template-columns:1fr 1fr;gap:0;margin:0 0 8px;background:var(--sunk);border-radius:8px;padding:2px}
 .eg-body .how button{background:transparent;border:0;height:28px;font-size:11.5px;color:var(--ink-2);border-radius:6px;padding:0 6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .eg-body .how button.on{background:var(--raise-2);color:var(--ink);font-weight:600}
+/* sizes */
+:host([data-size="small"]) .eg-body .gwrap canvas{height:118px}
+:host([data-size="small"]) .eg-body .more .gwrap canvas{height:96px}
+:host([data-size="small"]) .eg-body .presets{grid-template-columns:repeat(8,1fr);gap:3px;margin-top:6px}
+:host([data-size="small"]) .eg-body .preset{padding:4px 0;border-radius:6px}
+:host([data-size="small"]) .eg-body .preset span{display:none}
+:host([data-size="small"]) .eg-body .preset svg{width:26px;height:16px}
+:host([data-size="small"]) .eg-body .kft-track{height:24px}
+:host([data-size="small"]) .eg-body .kft-seg{height:22px}
+:host([data-size="small"]) .eg-body .kft-key{top:8px;width:7px;height:7px;margin-left:-3.5px}
+:host([data-size="small"]) .eg-body .kft-legend{display:none}
+:host([data-size="small"]) .eg-body .manual,:host([data-size="small"]) .eg-body .ph-row{margin-top:6px}
+:host([data-size="small"]) .eg-body input,:host([data-size="small"]) .eg-body .ph-row button{padding-top:4px;padding-bottom:4px;font-size:11.5px}
+:host([data-size="large"]) .eg-body .gwrap canvas{height:250px}
+:host([data-size="large"]) .eg-body .kft-track{height:44px}
+:host([data-size="large"]) .eg-body .kft-seg{height:42px}
+:host([data-size="large"]) .eg-body .kft-key{top:17px}
+:host([data-size="large"]) .eg-body .preset svg{width:44px;height:28px}
+:host([data-size="large"]) .eg-body .preset{font-size:12px;padding:9px 2px 8px}
 `;
 
 function loadHost() {
@@ -153,6 +174,7 @@ function run(shadow, root) {
 export default function EaseGraph() {
   const host = useRef(null);
   const [error, setError] = useState("");
+  useEffect(() => (host.current ? followSize(host.current) : undefined), []);
   useEffect(() => {
     if (!host.current) return undefined;
     const shadow = host.current.shadowRoot || host.current.attachShadow({ mode: "open" });
@@ -169,6 +191,7 @@ export default function EaseGraph() {
   return (
     <div className="ease-graph">
       {error && <p className="msg bad">{error}</p>}
+      <div className="tool-bar-right"><SizeSwitch /></div>
       <div ref={host} className="ease-graph-host" />
     </div>
   );

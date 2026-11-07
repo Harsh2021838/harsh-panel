@@ -6,6 +6,8 @@
 // Premiere the first time the tool opens. Its library lives in
 // <Harsh Library>/Tools/Sound Kit/library.json (copied once from Documents/ClientSoundKit).
 import { useEffect, useRef, useState } from "react";
+import { followSize } from "../../density.js";
+import SizeSwitch from "../SizeSwitch.jsx";
 import { nodeRequire, extensionPath, evalRaw, hostName, asciiScript } from "../../host.js";
 import { toolDir } from "../../library.js";
 import source from "./vendor/main.js.txt";
@@ -124,6 +126,19 @@ const LOOK_CSS = `
 .csk-body .save{background:var(--mark);border-color:var(--mark);color:var(--mark-ink)}
 .csk-body .swatch{border-radius:5px}
 .csk-body .fader-track{background:var(--sunk);border-color:transparent;border-radius:6px}
+/* sizes */
+:host([data-size="small"]) .csk-body .card{padding:6px 8px 6px 9px;gap:4px;border-radius:7px}
+:host([data-size="small"]) .csk-body .name{font-size:12px}
+:host([data-size="small"]) .csk-body .wave{height:34px}
+:host([data-size="small"]) .csk-body .hint-text{display:none}
+:host([data-size="small"]) .csk-body .hint-row{justify-content:flex-end;margin-top:-2px}
+:host([data-size="small"]) .csk-body .place{height:22px;font-size:11px}
+:host([data-size="small"]) .csk-body .list{gap:5px}
+:host([data-size="small"]) .csk-body .tab{height:28px}
+:host([data-size="small"]) .csk-body .drop-row button{height:28px}
+:host([data-size="large"]) .csk-body .wave{height:78px}
+:host([data-size="large"]) .csk-body .name{font-size:14px}
+:host([data-size="large"]) .csk-body .card{padding:11px 12px 11px 13px;gap:9px}
 `;
 
 const ASK_CSS = ".csk-body { position: relative; }" +
@@ -230,6 +245,7 @@ export default function SoundKit() {
   const started = useRef(false);
   const [error, setError] = useState("");
 
+  useEffect(() => (host.current ? followSize(host.current) : undefined), []);
   useEffect(() => {
     if (started.current || !host.current) return;
     started.current = true;
@@ -253,6 +269,7 @@ export default function SoundKit() {
   return (
     <div className="sound-kit">
       {error && <p className="msg bad">{error}</p>}
+      <div className="tool-bar-right"><SizeSwitch /></div>
       <div ref={host} className="sound-kit-host" />
     </div>
   );

@@ -148,9 +148,11 @@ FrameshiftEG.writeRanges = function (json) {
         }
       }
       // 2b) Premiere's own interpolation on the two end keys (5 = Bezier, 0 = Linear)
-      if (job.interp !== undefined && job.keys.length) {
-        try { prm.setInterpolationTypeAtKey(FrameshiftEG.mkTime(job.keys[0].t), job.interp, false); } catch (e4) {}
-        try { prm.setInterpolationTypeAtKey(FrameshiftEG.mkTime(job.keys[job.keys.length - 1].t), job.interp, false); } catch (e5) {}
+      //     (or per end: interpA on the first key, interpB on the last; 1/2/3 = Ease In/Out/Both)
+      if ((job.interp !== undefined || job.interpA !== undefined) && job.keys.length) {
+        var ia = job.interpA !== undefined ? job.interpA : job.interp, ib = job.interpB !== undefined ? job.interpB : job.interp;
+        try { prm.setInterpolationTypeAtKey(FrameshiftEG.mkTime(job.keys[0].t), ia, false); } catch (e4) {}
+        try { prm.setInterpolationTypeAtKey(FrameshiftEG.mkTime(job.keys[job.keys.length - 1].t), ib, false); } catch (e5) {}
       }
       // 3) refresh Premiere UI once per job
       if (job.keys.length) {

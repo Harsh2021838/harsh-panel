@@ -824,6 +824,38 @@
     return a;
   }
 
+  // Frameshift: every sound is kept inside the library (Frameshift Library/Tools/Sound Kit/Sounds/
+  // <client>), a fixed place that doesn't move. Clips placed from the panel link there, so they stay
+  // online when the original in Downloads or a project folder is moved or deleted.
+  function inLibrary(p) { var rel = nodePath.relative(LIB_DIR, p); return rel && rel.slice(0, 2) !== '..' && !nodePath.isAbsolute(rel); }
+  function keepInLibrary(p, clientName) {
+    if (!nodeFs || !p || inLibrary(p)) return p;
+    try {
+      if (!nodeFs.existsSync(p)) return p;
+      var dir = nodePath.join(LIB_DIR, 'Sounds', safeName(clientName || client().name));
+      mkdirp(dir);
+      var ext = nodePath.extname(p), stem = nodePath.basename(p, ext), size = nodeFs.statSync(p).size, to = nodePath.join(dir, stem + ext), n = 2;
+      while (nodeFs.existsSync(to)) {
+        if (nodeFs.statSync(to).size === size && sameAudio(to, p)) return to;
+        to = nodePath.join(dir, stem + ' ' + (n++) + ext);
+      }
+      nodeFs.copyFileSync(p, to);
+      return to;
+    } catch (e) { return p; }
+  }
+  // Sounds added before this: copy them in once (the originals stay where they are).
+  function moveSoundsIntoLibrary() {
+    if (!nodeFs) return;
+    var changed = 0;
+    lib.clients.forEach(function (c) {
+      c.assets.forEach(function (a) {
+        if (!a.path || inLibrary(a.path) || !nodeFs.existsSync(a.path)) return;
+        var to = keepInLibrary(a.path, c.name);
+        if (to !== a.path) { a.source = a.source || a.path; a.path = to; changed++; }
+      });
+    });
+    if (changed) { save(); renderAll(); }
+  }
   function addFiles(paths) {
     paths = paths.filter(function (p) { return p && AUDIO_EXT.test(p); });
     if (!paths.length) { setStatus('No audio files found. Supported: wav, mp3, aif, m4a, aac, flac, ogg.', 'err'); return; }
@@ -832,7 +864,7 @@
       var dup = kind !== 'part' ? duplicateOf(kind, p) : null;
       if (!dup) dup = added.filter(function (x) { return sameAudio(x.path, p); })[0] && { kind: kind, name: baseName(p) };
       if (dup) { skipped.push(dup); return; }
-      var a = newAsset(kind, p); client().assets.push(a); added.push(a);
+      var a = newAsset(kind, keepInLibrary(p)); if (a.path !== p) a.source = p; client().assets.push(a); added.push(a);
     });
     if (!added.length) { setStatus(skipped.length === 1 ? dupMessage(skipped[0]) : 'All ' + skipped.length + ' were already in ' + KIND_NAME[kind] + '.', 'err'); return; }
     save();
@@ -967,7 +999,7 @@
           var dup1 = duplicateOf('part', first.path, first.inS, first.outS);
           if (dup1) { dups.push(dup1); return Promise.resolve(); }
           var k1 = withFades(cleanKeys((first.keys || []).slice()), first.outS - first.inS, first.fadeIn, first.fadeOut, first.db);
-          saved.push(newAsset('part', first.path, Object.assign(common, { in: first.inS, out: first.outS, keys: k1, db: k1.length ? k1[0][1] : first.db })));
+          saved.push(newAsset('part', keepInLibrary(first.path), Object.assign(common, { in: first.inS, out: first.outS, keys: k1, db: k1.length ? k1[0][1] : first.db })));
           return Promise.resolve();
         }
         joined++;
@@ -2457,6 +2489,7 @@
 
   // ---------- Boot ----------
   renderAll();
+  setTimeout(moveSoundsIntoLibrary, 1500);
   if (inCEP) {
     host('FrameshiftSK.ping()').then(function (r) {
       if (r.indexOf('OK|') === 0) setStatus('Ready. Move the playhead, then click a sound or drag it to the timeline.');

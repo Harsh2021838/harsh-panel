@@ -1,3 +1,4 @@
+import { SIZES, getSize, setSize } from "../density.js";
 import React, { useEffect, useState } from "react";
 import { pickFolder } from "../host.js";
 import { Folder, Book } from "../icons.jsx";
@@ -18,6 +19,17 @@ const LAYOUT = [
 
 // Long paths keep their end (the part that tells you where it is): "\u2026/Dropbox/Team/Frameshift Library".
 const shortPath = (p) => (p.length > 44 ? "\u2026" + p.slice(-43) : p);
+
+function SizePicker() {
+  const [v, setV] = useState(getSize());
+  return (
+    <div className="seg" role="radiogroup" aria-label="Size of the tools">
+      {SIZES.map(([id, label]) => (
+        <button key={id} role="radio" aria-checked={v === id} className={v === id ? "on" : ""} onClick={() => { setSize(id); setV(id); }}>{label}</button>
+      ))}
+    </div>
+  );
+}
 
 export default function Settings({ clients, active, onLibraryChanged, openGuide, version }) {
   const [stats, setStats] = useState(null);
@@ -111,6 +123,12 @@ export default function Settings({ clients, active, onLibraryChanged, openGuide,
           </div>
         )}
         <p className="help">Put it in Dropbox, Google Drive or on a server to share clients and assets with your team.</p>
+      </section>
+
+      <section className="block">
+        <h3 className="block-title">Size of the tools</h3>
+        <p className="help">How big graphs, waveforms and buttons are in Ease Graph and Sound Kit. Small fits more in a narrow panel.</p>
+        <SizePicker />
       </section>
 
       <section className="block">

@@ -19,8 +19,10 @@
     seen: {},                                // keyframes already known, per property
     selSegs: {},                             // keyframe pairs picked in the strip: "paramKey|t" -> true
     zoom: 1,
-    // Premiere's own Bezier (set by script) keeps the old speed, so it never eases: always draw the curve.
-    native: false,
+    // Premiere's own Ease In / Ease Out (2 keys, nothing added) for Smart and Easy Ease, when this
+    // Premiere does it from a script. Checked after every apply by sampling the real motion; if it
+    // didn't ease, the curve is drawn with keys instead and native ease isn't tried again.
+    native: load('easegraph.nativeWorks', null) !== false,
     samples: {}                              // "paramKey|t" -> values Premiere really plays
   };
 
@@ -260,7 +262,8 @@
           if (!A[i + 1]) return;
           undo.push(snapshot(prm, A[i].t, A[i + 1].t));
           if (state.native) {
-            jobs.push({ nodeId: prm.nodeId, c: prm.c, p: prm.p, t0: A[i].t, t1: A[i + 1].t, tol: Math.max(2, Math.floor(state.data.timebase * 0.25)), keys: [A[i], A[i + 1]], interp: 5 });
+            jobs.push({ nodeId: prm.nodeId, c: prm.c, p: prm.p, t0: A[i].t, t1: A[i + 1].t, tol: Math.max(2, Math.floor(state.data.timebase * 0.25)), keys: [A[i], A[i + 1]],
+              interpA: i === 0 ? 3 : 5, interpB: i + 1 === A.length - 1 ? 3 : 5 });
             r.curves[A[i].t] = { type: 'native', smart: true };
           } else {
             jobs.push(bakeJob(prm, A[i], A[i + 1], sm[A[i].t]));
@@ -278,11 +281,33 @@
     });
   }
 
+  function nativeFor(smart, curve) {
+    if (!state.native) return false;
+    return smart || curveName(curve) === 'Easy Ease';
+  }
+  // Ask Premiere how the pairs really move now. Smooth: done, with just your keys. Still linear:
+  // this Premiere doesn't ease from scripts, so draw the curve with keys and stop trying.
+  function verifyNative(keys, count) {
+    var jobs = [], want = {};
+    keys.forEach(function (k) { want[k] = 1; });
+    var pairs = [];
+    targets().forEach(function (prm) {
+      segmentsFor(prm, 'every').forEach(function (sg) { if (want[segKey(prm, sg.a)]) { pairs.push({ prm: prm, s: sg }); jobs.push({ nodeId: prm.nodeId, c: prm.c, p: prm.p, t0: sg.a.t, t1: sg.b.t, n: 16 }); } });
+    });
+    return loadSelection(true).then(function () { return H.call('samples', { jobs: jobs }); }).then(function (out) {
+      var ok = out.some(function (v, i) { return isEased(progress(v, pairs[i].s.a, pairs[i].s.b)) === true; });
+      if (ok) { save('easegraph.nativeWorks', true); return 'Eased ' + count + ' keyframe pair' + (count > 1 ? 's' : '') + ' with Premiere\u2019s own ease. No keys added.'; }
+      state.native = false; save('easegraph.nativeWorks', false);
+      state.pendingApply = true;
+      return 'Premiere didn\u2019t ease it from a script, so the curve is drawn with keys instead.';
+    });
+  }
+
   function applyCurve() {
     if (state.busy) { state.pendingApply = true; return; }
     if (!targets().length) return setStatus('Select a clip that has 2 keyframes first.', 'err');
     run('Applying', function () {
-      var scope = $('#scope').value, jobs = [], undo = [], count = 0, curve = clone(state.curve);
+      var scope = $('#scope').value, jobs = [], undo = [], count = 0, curve = clone(state.curve), nativeKeys = [];
       var smart = state.mode === 'smart';
       targets().forEach(function (prm) {
         var segs = segmentsFor(prm, scope);
@@ -291,11 +316,14 @@
         segs.forEach(function (s) {
           if (sm) curve = sm[s.a.t];
           undo.push(snapshot(prm, s.a.t, s.b.t));
-          if (state.native) {
-            // Premiere's own ease: just the two keys, set to Bezier (Linear stays linear)
-            var lin = curve && curve.type === 'bezier' && E.sameCurve(curve, { type: 'bezier', p: [0, 0, 1, 1] }) || curveName(curve) === 'Linear';
-            jobs.push({ nodeId: prm.nodeId, c: prm.c, p: prm.p, t0: s.a.t, t1: s.b.t, tol: Math.max(2, Math.floor(state.data.timebase * 0.25)), keys: [s.a, s.b], interp: lin ? 0 : 5 });
-            r.curves[s.a.t] = lin ? null : { type: 'native' };
+          var useNative = nativeFor(smart, curve);
+          if (useNative) {
+            // Premiere's own ease on the two keys: soft start and stop (Smart keeps moving through middle keys)
+            var A2 = getAnchors(prm), first = s.a.t === A2[0].t, last = s.b.t === A2[A2.length - 1].t;
+            jobs.push({ nodeId: prm.nodeId, c: prm.c, p: prm.p, t0: s.a.t, t1: s.b.t, tol: Math.max(2, Math.floor(state.data.timebase * 0.25)), keys: [s.a, s.b],
+              interpA: smart && !first ? 5 : 3, interpB: smart && !last ? 5 : 3 });
+            r.curves[s.a.t] = { type: 'native', smart: smart };
+            nativeKeys.push(segKey(prm, s.a));
           } else {
             jobs.push(bakeJob(prm, s.a, s.b, curve));
             r.curves[s.a.t] = curve;
@@ -310,7 +338,7 @@
         'The chosen properties need at least 2 keyframes.');
       pushUndo('apply', undo);
       return H.call('writeRanges', { jobs: jobs }).then(function () {
-        if (state.native) return 'Premiere ease set on ' + count + ' keyframe pair' + (count > 1 ? 's' : '') + '. The strip above shows the real motion.';
+        if (nativeKeys.length) return verifyNative(nativeKeys, count);
         var nm = smart ? 'Smart ease' : curveName(curve);
         if (!smart && nm === 'Custom' && curve.type === 'bezier') { var ae = E.toAE(curve); nm = 'Ease ' + Math.round(ae.outInf * 100) + '% out, ' + Math.round(ae.inInf * 100) + '% in,'; }
         return nm + ' applied to ' + count + ' keyframe pair' + (count > 1 ? 's' : '') + '.';
@@ -600,7 +628,7 @@
       '<circle cx="22" cy="15" r="2.4" fill="currentColor"/></svg><span>Smart</span></button>';
     allPresets().forEach(function (p, i) {
       html += '<button class="preset' + (p.custom ? ' custom' : '') + '" data-i="' + i + '" aria-pressed="' + (!smart && E.sameCurve(p.curve, state.curve)) + '"' +
-        (p.custom ? ' title="Right-click to delete"' : '') + '>' + presetIcon(p.curve) + '<span>' + esc(p.name) + '</span></button>';
+        ' title="' + esc(p.name) + (p.custom ? ' (right-click to delete)' : '') + '">' + presetIcon(p.curve) + '<span>' + esc(p.name) + '</span></button>';
     });
     $('#presets').innerHTML = html;
   }
@@ -818,7 +846,7 @@
   });
 
   $('#more').addEventListener('toggle', drawAll);
-  window.addEventListener('resize', drawAll);
+  window.addEventListener('resize', function () { drawAll(); if (state.data) renderStrip(); });
 
   /* ---------------- motion preview ---------------- */
   (function anim() {
