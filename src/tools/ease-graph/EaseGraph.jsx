@@ -7,7 +7,8 @@
 //     busy with another command, and every timer stops when you leave the tool.
 import { useEffect, useRef, useState } from "react";
 import { followSize, rem } from "../../density.js";
-import { extensionPath, evalRaw, hostBusy } from "../../host.js";
+import { extensionPath, evalRaw, hostBusy, nodeRequire } from "../../host.js";
+import { toolDir } from "../../library.js";
 import easeSrc from "./vendor/ease.js.txt";
 import bridgeSrc from "./vendor/host-bridge.js.txt";
 import appSrc from "./vendor/app.js.txt";
@@ -54,6 +55,31 @@ const LOOK = `
 .eg-body .preset:hover{background:var(--raise);color:var(--ink)}
 .eg-body .preset[aria-pressed="true"],.eg-body .preset.smart[aria-pressed="true"]{background:var(--mark-soft);border-color:var(--mark);color:var(--ink)}
 .eg-body .preset[aria-pressed="true"] svg{color:var(--mark)}
+.eg-body .mine-title{grid-column:1/-1;margin:6px 0 -1px;font-size:11px;color:var(--ink-3);font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.eg-body .mine-title i{font-style:normal;font-weight:400}
+.eg-body .preset.custom{border-style:solid}
+.eg-body .preset.client{box-shadow:inset 0 -2px 0 var(--good)}
+.eg-body .preset.add{border-style:dashed;color:var(--ink-3)}
+.eg-body .preset.add svg{color:var(--ink-3)}
+.eg-body .preset.add:hover,.eg-body .preset.add:hover svg{color:var(--ink)}
+.eg-body .my-ease{margin-top:8px;background:var(--sunk);border-radius:10px;box-shadow:inset 0 0 0 1px var(--line);padding:8px 10px}
+.eg-body .my-row{display:flex;align-items:center;gap:10px;min-height:22px}
+.eg-body .my-label{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px}
+.eg-body .my-label i{font-style:normal;color:var(--ink-3)}
+.eg-body .my-row .link{color:var(--ink-2);padding:0;height:auto;font-size:11.5px}
+.eg-body .my-row .link:hover{color:var(--ink)}
+.eg-body .my-row .my-del.sure{color:var(--bad)}
+.eg-body .my-form{display:flex;flex-direction:column;gap:8px}
+.eg-body .my-name{display:flex;flex-direction:column;gap:3px;font-size:11px;color:var(--ink-3)}
+.eg-body .my-name input{width:100%;height:30px;padding:0 9px;font-size:12.5px;box-sizing:border-box}
+.eg-body .my-for{display:flex;gap:2px;padding:2px;border-radius:8px;background:var(--bg,#232323)}
+.eg-body .my-for button{flex:1;min-width:0;height:26px;border:0;background:transparent;color:var(--ink-2);border-radius:6px;font-size:11.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.eg-body .my-for button.on{background:var(--raise-2);color:var(--ink);font-weight:600;box-shadow:inset 0 0 0 1px var(--line)}
+.eg-body .my-hint{margin:0;font-size:11px;color:var(--ink-3)}
+.eg-body .my-acts{display:flex;gap:6px;justify-content:flex-end}
+.eg-body .my-acts button{height:28px;padding:0 12px;font-size:12px}
+.eg-body .my-acts .my-save{background:var(--mark);border-color:var(--mark);color:var(--mark-ink);font-weight:600}
+.eg-body .my-acts .my-save:hover{background:var(--mark-hover);border-color:var(--mark-hover)}
 .eg-body .manual{margin-top:12px;gap:6px}
 .eg-body .manual label,.eg-body .field-grid label{color:var(--ink-3);font-size:11px}
 .eg-body .num-in i{color:var(--ink-3)}
@@ -109,7 +135,39 @@ function loadHost() {
   });
 }
 
-function run(shadow, root) {
+// Your own eases live in the Frameshift Library (Tools/Ease Graph/presets.json), so they stay with
+// your clients, go into backups and follow the library to another computer. Each one is for every
+// client (client: null) or for one client. Plain synchronous file calls: Premiere's panel has crashed
+// on Node's async file calls before.
+async function presetStore() {
+  const fs = nodeRequire && nodeRequire("fs");
+  const OLD = "easegraph.presets";
+  const fromBrowser = () => { try { return JSON.parse(localStorage.getItem(OLD) || "[]"); } catch (e) { return []; } };
+  let file = "";
+  if (fs) { try { file = (await toolDir("Ease Graph")) + "/presets.json"; } catch (e) { file = ""; } }
+  const fixUp = (list) => (Array.isArray(list) ? list : []).filter((p) => p && p.curve).map((p, i) => ({
+    id: p.id || "p" + Date.now().toString(36) + i, name: p.name || "My ease", curve: p.curve, client: p.client || null, clientName: p.clientName || "",
+  }));
+  const store = {
+    load() {
+      if (file) {
+        try { if (fs.existsSync(file)) return fixUp(JSON.parse(fs.readFileSync(file, "utf8"))); } catch (e) {}
+        const old = fixUp(fromBrowser()); // eases saved before they moved into the library
+        if (old.length) store.save(old);
+        return old;
+      }
+      return fixUp(fromBrowser());
+    },
+    save(list) {
+      const text = JSON.stringify(list, null, 1);
+      if (file) { try { fs.writeFileSync(file + ".tmp", text); fs.renameSync(file + ".tmp", file); return true; } catch (e) { return false; } }
+      try { localStorage.setItem(OLD, text); return true; } catch (e) { return false; }
+    },
+  };
+  return store;
+}
+
+function run(shadow, root, store, getClient) {
   const timers = new Set(), frames = new Set();
   let alive = true;
   const doc = {
@@ -128,6 +186,8 @@ function run(shadow, root) {
     // In the demo page there's no Premiere: EaseGraph's own demo clip is used.
     __adobe_cep__: window.__adobe_cep__ && !window.__DEMO_AEP ? { evalScript: (code, cb) => { evalRaw(code).then((r) => cb && cb(r)); } } : undefined,
     __egQuiet: () => !alive || hostBusy() || !root.offsetParent,
+    __egPresets: store,
+    __egClient: getClient,
     matchMedia: window.matchMedia && window.matchMedia.bind(window),
     get devicePixelRatio() { return window.devicePixelRatio; },
     get innerWidth() { return root.clientWidth || window.innerWidth; },
@@ -151,8 +211,15 @@ function run(shadow, root) {
   };
 }
 
-export default function EaseGraph() {
+export default function EaseGraph({ client }) {
   const host = useRef(null);
+  const clientRef = useRef(null);
+  clientRef.current = client ? { id: client.id, name: client.name } : null;
+  // the eases shown follow the client picked at the top of the panel
+  useEffect(() => {
+    const root = host.current && host.current.shadowRoot && host.current.shadowRoot.querySelector(".eg-body");
+    if (root) root.dispatchEvent(new Event("eg-client"));
+  }, [client && client.id]);
   const [error, setError] = useState("");
   useEffect(() => (host.current ? followSize(host.current) : undefined), []);
   useEffect(() => {
@@ -164,7 +231,9 @@ export default function EaseGraph() {
     (async () => {
       if (window.__adobe_cep__ && !window.__DEMO_AEP) await loadHost().catch((e) => setError(e.message));
       if (cancelled) return;
-      try { stop = run(shadow, root); } catch (e) { setError("Ease Graph couldn't start: " + e.message); }
+      const store = await presetStore();
+      if (cancelled) return;
+      try { stop = run(shadow, root, store, () => clientRef.current); } catch (e) { setError("Ease Graph couldn't start: " + e.message); }
     })();
     return () => { cancelled = true; if (stop) stop(); };
   }, []);

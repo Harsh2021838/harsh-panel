@@ -19,7 +19,7 @@ import AudioQC from "./tools/audio-qc/AudioQC.jsx";
 import CompVault from "./tools/comp-vault/CompVault.jsx";
 import "./styles.css";
 
-const VERSION = "2.21.0";
+const VERSION = "2.22.0";
 
 // The four sections. Add a tool by putting it in a section's `tools` list
 // (or drop a plugin file into /plugins, see plugins/README.md).
@@ -279,7 +279,7 @@ function App() {
                 <h1 className="tool-title">{t.name}</h1>
                 <SizeSwitch />
               </div>
-              <C report={report(t.id)} />
+              <C report={report(t.id)} client={active} />
             </div>
           );
         })}

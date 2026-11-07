@@ -140,6 +140,8 @@
   function curveName(c) {
     if (!c) return '';
     if (c.type === 'native') return 'Premiere ease';
+    var pk = picked && byId(picked);
+    if (pk && E.sameCurve(pk.curve, c)) return pk.name;
     var all = E.presets.concat(customPresets());
     var m = all.filter(function (p) { return E.sameCurve(p.curve, c); })[0];
     return m ? m.name : 'Custom';
@@ -607,7 +609,24 @@
   });
 
   /* ---------------- presets ---------------- */
-  function customPresets() { return load('easegraph.presets', []); }
+  // Your own eases ("My eases"): saved in the Frameshift Library through window.__egPresets, each
+  // one for every client or for one client. The grid shows the built-in eases, then the picked
+  // client's eases, then the ones for every client, then a + tile to save the current curve.
+  var store = window.__egPresets || { load: function () { return load('easegraph.presets', []); }, save: function (l) { save('easegraph.presets', l); return true; } };
+  var mine = store.load();
+  var picked = null;      // id of the saved ease that's chosen, to rename or delete it
+  var form = null;        // { mode: 'new' | 'rename', id, name, forClient }
+  function curClient() { return (window.__egClient && window.__egClient()) || null; }
+  function customPresets() { return mine; }
+  function shownMine() {
+    var c = curClient();
+    var forC = c ? mine.filter(function (p) { return p.client === c.id; }) : [];
+    return forC.concat(mine.filter(function (p) { return !p.client; }));
+  }
+  function keep(msg) {
+    if (!store.save(mine)) return setStatus('Couldn’t save your eases to the library folder.', 'err');
+    if (msg) setStatus(msg, 'ok');
+  }
   function presetIcon(curve) {
     var f = E.compile(curve), pts = [], lo = 0, hi = 1, i, y;
     for (i = 0; i <= 30; i++) { y = f(i / 30); pts.push(y); lo = Math.min(lo, y); hi = Math.max(hi, y); }
@@ -619,45 +638,122 @@
   // Main presets never overshoot your keyframe values
   var MAIN = ['easy', 'smooth', 'out', 'in', 'expo', 'quint', 'linear'];
   var builtIn = E.presets.filter(function (p) { return MAIN.indexOf(p.id) >= 0; });
-  function allPresets() { return builtIn.concat(customPresets().map(function (p) { p.custom = true; return p; })); }
+  function allPresets() { return builtIn.concat(shownMine().map(function (p) { p.custom = true; return p; })); }
   function setMode(m) { state.mode = m; save('easegraph.mode', m); }
+  function byId(id) { return mine.filter(function (p) { return p.id === id; })[0]; }
   function renderPresets() {
-    var smart = state.mode === 'smart';
-    var html = '<button class="preset smart" data-i="smart" aria-pressed="' + smart + '" title="Reads your motion: soft at starts and stops, keeps moving through middle keys">' +
+    var smart = state.mode === 'smart', c = curClient();
+    if (picked) { var pk = byId(picked); if (!pk || !E.sameCurve(pk.curve, state.curve)) picked = null; } // curve dragged since
+    var html = '<button class="preset smart" data-b="smart" aria-pressed="' + smart + '" title="Reads your motion: soft at starts and stops, keeps moving through middle keys">' +
       '<svg viewBox="0 0 44 30" aria-hidden="true"><path d="M2 28 C14 28 14 15 22 15 S30 2 42 2" fill="none" stroke="currentColor" stroke-width="1.6"/>' +
       '<circle cx="22" cy="15" r="2.4" fill="currentColor"/></svg><span>Smart</span></button>';
-    allPresets().forEach(function (p, i) {
-      html += '<button class="preset' + (p.custom ? ' custom' : '') + '" data-i="' + i + '" aria-pressed="' + (!smart && E.sameCurve(p.curve, state.curve)) + '"' +
-        ' title="' + esc(p.name) + (p.custom ? ' (right-click to delete)' : '') + '">' + presetIcon(p.curve) + '<span>' + esc(p.name) + '</span></button>';
+    builtIn.forEach(function (p, i) {
+      html += '<button class="preset" data-b="' + i + '" aria-pressed="' + (!smart && !picked && E.sameCurve(p.curve, state.curve)) + '" title="' + esc(p.name) + '">' +
+        presetIcon(p.curve) + '<span>' + esc(p.name) + '</span></button>';
     });
+    var list = shownMine();
+    if (list.length) html += '<p class="mine-title">My eases' + (c ? ' <i>for ' + esc(c.name) + ' and every client</i>' : '') + '</p>';
+    list.forEach(function (p) {
+      var on = !smart && (picked === p.id || (!picked && E.sameCurve(p.curve, state.curve)));
+      html += '<button class="preset custom' + (p.client ? ' client' : '') + '" data-id="' + esc(p.id) + '" aria-pressed="' + on + '" title="' + esc(p.name) +
+        (p.client ? ' (' + esc(p.clientName || 'one client') + ')' : ' (every client)') + '">' + presetIcon(p.curve) + '<span>' + esc(p.name) + '</span></button>';
+    });
+    html += '<button class="preset add" data-add="1" title="Save the curve on the graph as your own ease"><svg viewBox="0 0 44 30" aria-hidden="true"><path d="M22 7v16M14 15h16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg><span>Save curve</span></button>';
     $('#presets').innerHTML = html;
+    renderMine();
+  }
+  // The row under the grid: the chosen saved ease with Rename / Delete, or the save form.
+  function renderMine() {
+    var box = $('#myEase'); if (!box) return;
+    var c = curClient();
+    if (form) {
+      var opts = '<button type="button" data-for="all" class="' + (!form.forClient ? 'on' : '') + '">Every client</button>' +
+        (c ? '<button type="button" data-for="client" class="' + (form.forClient ? 'on' : '') + '">Only ' + esc(c.name) + '</button>' : '');
+      box.innerHTML = '<form class="my-form">' +
+        '<label class="my-name">Name<input id="myName" maxlength="24" autocomplete="off" spellcheck="false" value="' + esc(form.name) + '" placeholder="Logo pop, Lower third in…"></label>' +
+        '<div class="my-for" role="radiogroup" aria-label="Who it’s for">' + opts + '</div>' +
+        (c ? '' : '<p class="my-hint">Pick a client at the top of the panel to save an ease just for them.</p>') +
+        '<div class="my-acts"><button type="button" class="my-cancel">Cancel</button><button type="submit" class="my-save">' + (form.mode === 'new' ? 'Save ease' : 'Save') + '</button></div></form>';
+      box.hidden = false;
+      if (form.focus) { form.focus = false; var inp = $('#myName'); if (inp) { inp.focus(); inp.select(); } }
+      return;
+    }
+    var p = picked && byId(picked);
+    if (!p) { box.hidden = true; box.innerHTML = ''; return; }
+    box.innerHTML = '<div class="my-row"><span class="my-label"><b>' + esc(p.name) + '</b> <i>' + (p.client ? 'only ' + esc(p.clientName || 'one client') : 'every client') + '</i></span>' +
+      '<button type="button" class="link my-rename">Rename</button><button type="button" class="link my-del">Delete</button></div>';
+    box.hidden = false;
+  }
+  function openForm(mode, p) {
+    var c = curClient();
+    form = mode === 'new'
+      ? { mode: 'new', name: '', forClient: !!c, focus: true }
+      : { mode: 'rename', id: p.id, name: p.name, forClient: !!p.client && !!c && p.client === c.id, focus: true };
+    renderMine();
   }
   $('#presets').addEventListener('click', function (e) {
     var b = e.target.closest('.preset'); if (!b) return;
-    if (b.getAttribute('data-i') === 'smart') {
-      setMode('smart');
+    if (b.getAttribute('data-add')) { picked = null; openForm('new'); renderPresets(); return; }
+    form = null;
+    var bi = b.getAttribute('data-b'), id = b.getAttribute('data-id');
+    if (bi === 'smart') {
+      picked = null; setMode('smart');
       if (state.curve.type !== 'bezier') state.curve = clone(E.presets[1].curve);
+    } else if (id) {
+      var p = byId(id); if (!p) return;
+      picked = id; setMode('curve'); state.curve = clone(p.curve);
     } else {
-      setMode('curve');
-      state.curve = clone(allPresets()[Number(b.getAttribute('data-i'))].curve);
+      picked = null; setMode('curve'); state.curve = clone(builtIn[Number(bi)].curve);
     }
     curveChanged();
     applyCurve();
   });
   $('#presets').addEventListener('contextmenu', function (e) {
     var b = e.target.closest('.preset.custom'); if (!b) return;
-    e.preventDefault();
-    var idx = Number(b.getAttribute('data-i')) - builtIn.length, list = customPresets();
-    var name = list[idx] && list[idx].name;
-    list.splice(idx, 1); save('easegraph.presets', list); renderPresets();
-    setStatus('Deleted preset “' + name + '”.');
+    e.preventDefault(); picked = b.getAttribute('data-id'); form = null; renderPresets();
   });
-  $('#btnSavePreset').addEventListener('click', function () {
-    var list = customPresets();
-    list.push({ name: 'My ' + (list.length + 1), curve: clone(state.curve) });
-    save('easegraph.presets', list); renderPresets();
-    setStatus('Saved as preset “My ' + list.length + '”.', 'ok');
+  $('#myEase').addEventListener('click', function (e) {
+    var t = e.target;
+    if (t.closest('.my-cancel')) { form = null; renderMine(); return; }
+    var f = t.closest('[data-for]');
+    if (f && form) { form.name = $('#myName').value; form.forClient = f.getAttribute('data-for') === 'client'; renderMine(); return; }
+    var p = picked && byId(picked);
+    if (t.closest('.my-rename') && p) { openForm('rename', p); return; }
+    if (t.closest('.my-del') && p) {
+      if (!t.classList.contains('sure')) { t.classList.add('sure'); t.textContent = 'Delete “' + p.name + '”?'; return; }
+      mine = mine.filter(function (x) { return x.id !== p.id; }); picked = null;
+      keep('Deleted “' + p.name + '”.'); renderPresets();
+    }
   });
+  $('#myEase').addEventListener('submit', function (e) {
+    e.preventDefault(); if (!form) return;
+    var name = ($('#myName').value || '').trim().slice(0, 24);
+    if (!name) { $('#myName').focus(); return; }
+    var c = curClient(), forC = form.forClient && c;
+    var clash = mine.filter(function (x) { return x.id !== form.id && x.name.toLowerCase() === name.toLowerCase() && (x.client || null) === (forC ? c.id : null); })[0];
+    if (clash) { setStatus('You already have an ease called “' + name + '” there. Pick another name.', 'err'); return; }
+    if (form.mode === 'new') {
+      if (state.curve.type !== 'bezier') { setStatus('Pick or drag a curve first, then save it.', 'err'); return; }
+      var p = { id: 'e' + Date.now().toString(36), name: name, curve: clone(state.curve), client: forC ? c.id : null, clientName: forC ? c.name : '' };
+      mine.push(p); picked = p.id;
+      keep('Saved “' + name + '”' + (forC ? ' for ' + c.name : ' for every client') + '.');
+    } else {
+      var q = byId(form.id); if (!q) { form = null; return renderPresets(); }
+      q.name = name; q.client = forC ? c.id : null; q.clientName = forC ? c.name : '';
+      keep('Saved “' + name + '”.');
+    }
+    form = null; renderPresets();
+  });
+  $('#myEase').addEventListener('input', function (e) { if (form && e.target.id === 'myName') form.name = e.target.value; });
+  $('#myEase').addEventListener('keydown', function (e) { if (e.key === 'Escape' && form) { form = null; renderMine(); } });
+  // a different client picked at the top of the panel: show that client's eases
+  document.addEventListener('eg-client', function () {
+    mine = store.load();
+    if (picked && !shownMine().some(function (p) { return p.id === picked; })) picked = null;
+    if (form && form.forClient && !curClient()) form.forClient = false;
+    renderPresets();
+  });
+  $('#btnSavePreset').addEventListener('click', function () { picked = null; openForm('new'); renderPresets(); $('#presets').scrollIntoView({ block: 'nearest' }); });
 
   /* ---------------- curve controls ---------------- */
   function curveChanged(skipInputs) {

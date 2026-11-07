@@ -25,6 +25,7 @@
   </section>
   <div class="gwrap"><canvas id="cvValue" aria-label="Ease graph. Drag the orange handles to shape the ease."></canvas></div>
   <div class="presets" id="presets"></div>
+  <div class="my-ease" id="myEase" hidden></div>
 
   <div class="manual">
     <label>Ease out<span class="num-in"><input id="outInf" name="outInf" type="number" inputmode="decimal" min="1" max="100" step="1" autocomplete="off"><i>%</i></span></label>
