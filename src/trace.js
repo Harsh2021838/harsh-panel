@@ -1,5 +1,7 @@
 // A short diary of what the panel did, written to disk as it happens:
-//   Documents/Frameshift Library/Logs/panel-steps.log
+//   Documents/Frameshift Library/Logs/panel-steps-PPRO.log (and -AEFT.log for After Effects)
+// One file per app: Premiere and After Effects can have the panel open at the same time, and with
+// one shared file each app read the other's lines and wrongly said "stopped unexpectedly".
 // If Premiere's panel engine crashes, the last lines say what the panel was doing at that moment,
 // even when Adobe's crash report shows nothing. Polling commands are left out to keep it short.
 const nodeRequire = typeof window.require === "function" ? window.require : window.cep_node && window.cep_node.require ? window.cep_node.require : null;
@@ -14,7 +16,9 @@ function where() {
   try {
     const dir = path.join(os.homedir(), "Documents", "Frameshift Library", "Logs");
     fs.mkdirSync(dir, { recursive: true });
-    file = path.join(dir, "panel-steps.log");
+    let app = "";
+    try { app = JSON.parse(window.__adobe_cep__.getHostEnvironment()).appName || ""; } catch (e) {}
+    file = path.join(dir, "panel-steps" + (app ? "-" + app.replace(/[^A-Za-z]/g, "") : "") + ".log");
   } catch (e) { file = null; }
   return file;
 }
