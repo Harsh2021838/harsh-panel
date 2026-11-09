@@ -23,13 +23,21 @@ export function autoScale(width) {
   return Math.min(1.16, Math.max(0.84, width / 340));
 }
 
-let last = 0;
+let last = 0, wideNow = false;
+/** True when the panel is wide enough for two columns (settings left, results right). */
+export function isWide() { return wideNow; }
 let measure = () => (document.getElementById("app") || document.body || {}).clientWidth || window.innerWidth;
 /** Sets the root font size from the size setting (and, in Auto, the panel's width). */
 export function applySize() {
   const s = getSize();
   const k = s === "auto" ? autoScale(measure()) : FIXED[s];
   const px = Math.round(16 * k * 4) / 4; // quarter-pixel steps so tiny resizes don't redraw everything
+  const wide = measure() / px >= 34; // about 545 px at Medium
+  if (wide !== wideNow) {
+    wideNow = wide;
+    document.documentElement.classList.toggle("fs-wide", wide);
+    window.dispatchEvent(new CustomEvent("fs-wide", { detail: wide }));
+  }
   if (px === last) return;
   last = px;
   document.documentElement.style.fontSize = px + "px";

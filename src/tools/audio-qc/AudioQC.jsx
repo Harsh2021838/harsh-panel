@@ -2,6 +2,7 @@
 // sound of the final video: distortion, music or SFX covering the voice, SFX at uneven levels,
 // and clicks at hard cuts. Host side: jsx/audio-qc.jsx. Listening: listen.js. Checks: analyze.js.
 import React, { useEffect, useRef, useState } from "react";
+import useWide from "../useWide.js";
 import { makeHost, nodeRequire, appSession } from "../../host.js";
 import { toolDir } from "../../library.js";
 import { Check, Ban } from "../../icons.jsx";
@@ -41,6 +42,7 @@ const baseName = (p) => String(p).split(/[\\/]/).pop();
 const heard = new Map();
 
 export default function AudioQC({ report = () => {} }) {
+  const wide = useWide();
   const [checks, setChecks] = useState(() => ({ distortion: true, cover: true, sfx: true, click: true, ...lsGet("checks", {}) }));
   const [musicGap, setMusicGap] = useState(() => lsGet("musicGap", 10));
   const [sfxSpread, setSfxSpread] = useState(() => lsGet("sfxSpread", 6));
@@ -177,8 +179,9 @@ export default function AudioQC({ report = () => {} }) {
   const r = run && run.result;
 
   return (
-    <div className="tool gap-qc audio-qc">
-      {run && !editSetup ? (
+    <div className={"tool gap-qc audio-qc" + (wide ? " qc-split" : "")}>
+      <div className="qc-left">
+      {run && !editSetup && !wide ? (
         <div className="setup-line">
           <span className="grow trunc">{run.dump.name}{run.dump.inS > 0 || run.dump.outS < run.dump.end ? " (In to Out)" : ""}, {plural(CHECKS.filter(([id]) => checks[id]).length, "check")}</span>
           <button className="ghost tight" disabled={busy} onClick={() => setEditSetup(true)}>Change</button>
@@ -219,6 +222,9 @@ export default function AudioQC({ report = () => {} }) {
           <button className="primary" disabled={busy || !CHECKS.some(([id]) => checks[id])} onClick={() => check()}>{busy ? "Checking…" : run ? "Check again" : "Check audio"}</button>
         </div>
       )}
+      </div>
+      <div className="qc-right">
+      {wide && !run && !busy && <p className="qc-empty">Results show here after you press Check audio.</p>}
 
       <div aria-live="polite">
         {busy && progress && <p className="help trunc">{progress}</p>}
@@ -339,6 +345,7 @@ export default function AudioQC({ report = () => {} }) {
           )}
         </div>
       )}
+      </div>
     </div>
   );
 }

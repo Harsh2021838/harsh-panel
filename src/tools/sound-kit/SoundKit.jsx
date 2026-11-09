@@ -112,6 +112,11 @@ const LOOK_CSS = `
 .csk-body .place{height:26px;background:transparent;border-color:var(--line)}
 .csk-body .place:hover{border-color:var(--c);background:var(--raise-2)}
 .csk-body .group{color:var(--ink-3);text-transform:none;letter-spacing:0;font-size:11.5px}
+/* wide panel: sounds side by side instead of one long column, buttons stay a normal size */
+:host-context(.fs-wide) .csk-body #list{display:grid;grid-template-columns:repeat(auto-fill,minmax(17rem,1fr));align-content:start;align-items:start}
+:host-context(.fs-wide) .csk-body #list>.group,:host-context(.fs-wide) .csk-body #list>.empty,:host-context(.fs-wide) .csk-body #list>.card.editing,:host-context(.fs-wide) .csk-body #list>.card.bgm{grid-column:1/-1}
+:host-context(.fs-wide) .csk-body .drop-row{justify-content:flex-start}
+:host-context(.fs-wide) .csk-body .drop-row button{flex:0 1 15rem}
 .csk-body .empty{border:1px dashed var(--line);border-radius:10px;padding:26px 16px;color:var(--ink-2);line-height:1.55;margin-top:4px}
 .csk-body .dropzone{border-top:1px solid var(--line);padding:10px 0 8px}
 .csk-body .dropzone.over{background:var(--mark-soft);outline:2px dashed var(--mark)}

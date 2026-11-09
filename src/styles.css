@@ -597,3 +597,10 @@ input[type="checkbox"] { accent-color: var(--mark); margin: 0; width: 13px; heig
 /* tools that fill the screen scroll inside it, so nothing is ever cut off at the bottom */
 .ease-graph { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; }
 .tool-head .size-switch { margin-left: auto; }
+
+/* ---- wide panel: settings on the left, results on the right (QC tools) ---- */
+.qc-split { display: flex; gap: 18px; align-items: flex-start; }
+.qc-split > .qc-left { flex: 0 0 auto; width: 21rem; max-width: 42%; position: sticky; top: 0; display: flex; flex-direction: column; gap: 10px; }
+.qc-split > .qc-right { flex: 1 1 0; min-width: 0; }
+.qc-split > .qc-right > :first-child { margin-top: 0; }
+.qc-empty { margin: 0; padding: 28px 16px; text-align: center; color: var(--ink-3); border: 1px dashed var(--line); border-radius: 10px; font-size: 12px; }

@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
+import useWide from "../useWide.js";
 import { host, hostApp, hostName, pickFiles, pickFolder, appSession, premiereGoTo } from "../../host.js";
 import { Gear, Close, Back, Forward, Target } from "../../icons.jsx";
 import { expandPremiere } from "./premiere-sources.js";
@@ -69,6 +70,7 @@ function Proofed({ g, big }) {
 }
 
 export default function TextQC({ report = () => {} }) {
+  const wide = useWide();
   const [scope, setScope] = useState(() => {
     const s = lsGet("scope", "all");
     return SCOPES.some((o) => o[0] === s) ? s : "all";
@@ -424,8 +426,47 @@ export default function TextQC({ report = () => {} }) {
   }
 
   // ------------------------------------------------------------------ main
+  // Settings, Dictionary and Reports: under the results in a narrow panel, under the settings in a wide one.
+  const extras = (
+    <>
+      <div className="foot-tools">
+        <button className="ghost tight" aria-expanded={showSettings} onClick={() => setShowSettings(!showSettings)}><Gear /> Settings</button>
+        <button className="ghost tight" onClick={() => util("dict")}>Dictionary</button>
+        <button className="ghost tight" onClick={() => util("reports")}>Reports</button>
+      </div>
+
+      {showSettings && (
+        <div className="pane settings">
+          <label className="field"><span>Language</span>
+            <select name="lang" value={settings.lang} onChange={(e) => set("lang", e.target.value)}>
+              {LANGS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+            </select>
+          </label>
+          <label className="field"><span>Spelling server</span>
+            <input name="server" type="url" autoComplete="off" spellCheck={false} value={settings.server} placeholder="Free LanguageTool (leave blank)…" onChange={(e) => set("server", e.target.value.trim())} />
+          </label>
+          <p className="help">The free server checks about 65,000 characters a minute and waits on its own if a job goes over. For no limit, run LanguageTool on your computer and enter its address, like http://localhost:8081.</p>
+          <label className="field"><span>Premium username</span>
+            <input name="lt-user" autoComplete="off" spellCheck={false} value={settings.username} placeholder="Optional…" onChange={(e) => set("username", e.target.value.trim())} />
+          </label>
+          <label className="field"><span>Premium API key</span>
+            <input name="lt-key" type="password" autoComplete="off" value={settings.apiKey} placeholder="Optional…" onChange={(e) => set("apiKey", e.target.value.trim())} />
+          </label>
+          {!isAE && (
+            <label className="check-inline"><input type="checkbox" checked={!!settings.deep} onChange={() => set("deep", !settings.deep)} /> Deep scan: look in every effect, not just graphics (slower)</label>
+          )}
+          <div className="inline">
+            <button className="ghost tight" onClick={() => util("test")}>Test connection</button>
+            <button className="ghost tight" onClick={() => util("loc")}>Change report folder…</button>
+            <button className="ghost tight" onClick={() => util("cache")}>Forget checked text</button>
+          </div>
+        </div>
+      )}
+    </>
+  );
   return (
-    <div className="tool">
+    <div className={"tool" + (wide ? " qc-split" : "")}>
+      <div className="qc-left">
       <div className="controls">
         <div className="seg" role="radiogroup" aria-label="What to check">
           {SCOPES.map(([id, label]) => (
@@ -506,6 +547,10 @@ export default function TextQC({ report = () => {} }) {
           <button className="primary" onClick={start}>{run ? "Check again" : "Check text"}</button>
         )}
       </div>
+      {wide && extras}
+      </div>
+      <div className="qc-right">
+      {wide && !run && !busy && <p className="qc-empty">Results show here after you press Check text.</p>}
 
       <div aria-live="polite">
         {jumpNote && <p className="msg warn">{jumpNote} <button className="link-btn" onClick={() => setJumpNote("")}>OK</button></p>}
@@ -652,39 +697,8 @@ export default function TextQC({ report = () => {} }) {
         </section>
       )}
 
-      <div className="foot-tools">
-        <button className="ghost tight" aria-expanded={showSettings} onClick={() => setShowSettings(!showSettings)}><Gear /> Settings</button>
-        <button className="ghost tight" onClick={() => util("dict")}>Dictionary</button>
-        <button className="ghost tight" onClick={() => util("reports")}>Reports</button>
+      {!wide && extras}
       </div>
-
-      {showSettings && (
-        <div className="pane settings">
-          <label className="field"><span>Language</span>
-            <select name="lang" value={settings.lang} onChange={(e) => set("lang", e.target.value)}>
-              {LANGS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-            </select>
-          </label>
-          <label className="field"><span>Spelling server</span>
-            <input name="server" type="url" autoComplete="off" spellCheck={false} value={settings.server} placeholder="Free LanguageTool (leave blank)…" onChange={(e) => set("server", e.target.value.trim())} />
-          </label>
-          <p className="help">The free server checks about 65,000 characters a minute and waits on its own if a job goes over. For no limit, run LanguageTool on your computer and enter its address, like http://localhost:8081.</p>
-          <label className="field"><span>Premium username</span>
-            <input name="lt-user" autoComplete="off" spellCheck={false} value={settings.username} placeholder="Optional…" onChange={(e) => set("username", e.target.value.trim())} />
-          </label>
-          <label className="field"><span>Premium API key</span>
-            <input name="lt-key" type="password" autoComplete="off" value={settings.apiKey} placeholder="Optional…" onChange={(e) => set("apiKey", e.target.value.trim())} />
-          </label>
-          {!isAE && (
-            <label className="check-inline"><input type="checkbox" checked={!!settings.deep} onChange={() => set("deep", !settings.deep)} /> Deep scan: look in every effect, not just graphics (slower)</label>
-          )}
-          <div className="inline">
-            <button className="ghost tight" onClick={() => util("test")}>Test connection</button>
-            <button className="ghost tight" onClick={() => util("loc")}>Change report folder…</button>
-            <button className="ghost tight" onClick={() => util("cache")}>Forget checked text</button>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

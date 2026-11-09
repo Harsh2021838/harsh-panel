@@ -2,6 +2,7 @@
 // Premiere also cuts that don't line up across tracks, audio out of sync, and black or offline clips.
 // Host side: jsx/gap-qc.jsx. Each gap is drawn as a tiny timeline so it reads at a glance.
 import React, { useEffect, useRef, useState } from "react";
+import useWide from "../useWide.js";
 import { makeHost, hostApp, nodeRequire, appSession, premiereGoTo } from "../../host.js";
 import { toolDir, lib } from "../../library.js";
 import { Target, Check, Ban, Join } from "../../icons.jsx";
@@ -143,6 +144,7 @@ function GapPicture({ g }) {
 }
 
 export default function GapQC({ report = () => {} }) {
+  const wide = useWide();
   const [scope, setScope] = useState(() => lsGet("scope2", SCOPES[0][0]));
   const [sel, setSel] = useState(null); // key of the selected row
   const [editSetup, setEditSetup] = useState(false);
@@ -348,8 +350,9 @@ export default function GapQC({ report = () => {} }) {
 
   const busy = phase === "checking";
   return (
-    <div className="tool gap-qc">
-      {run && !editSetup ? (
+    <div className={"tool gap-qc" + (wide ? " qc-split" : "")}>
+      <div className="qc-left">
+      {run && !editSetup && !wide ? (
         // After a check the settings fold into one line, so the list starts near the top.
         <div className="setup-line">
           <span className="grow trunc">
@@ -391,6 +394,9 @@ export default function GapQC({ report = () => {} }) {
         <button className="primary" disabled={busy || (!isAE && !CHECKS.some(([id]) => checks[id]))} onClick={check}>{busy ? "Checking\u2026" : run ? "Check again" : isAE ? "Find gaps" : "Check timeline"}</button>
       </div>
       )}
+      </div>
+      <div className="qc-right">
+      {wide && !run && !busy && <p className="qc-empty">Results show here after you press {isAE ? "Find gaps" : "Check timeline"}.</p>}
 
       <div aria-live="polite">
         {crashNote && <p className="msg warn">{crashNote} <button className="link-btn" onClick={() => setCrashNote("")}>OK</button></p>}
@@ -492,6 +498,7 @@ export default function GapQC({ report = () => {} }) {
           )}
         </div>
       )}
+      </div>
     </div>
   );
 }
