@@ -48,7 +48,14 @@ const LOOK = `
 .eg-body .switch input:checked + .track{background:var(--mark)}
 .eg-body .switch input:checked + .track::after{background:var(--mark-ink)}
 .eg-body .gwrap{background:var(--sunk);border-radius:10px;box-shadow:inset 0 0 0 1px var(--line)}
-.eg-body .gwrap canvas{height:200px}
+.eg-body .gwrap canvas{height:var(--gh,200px)}
+/* auto fit: a wide panel puts the graph on the left and the controls on the right */
+.eg-body .eg-cols{display:block}
+.eg-body.wide .eg-cols{display:flex;gap:16px;align-items:flex-start}
+.eg-body.wide .eg-left{flex:1.35 1 0;min-width:0;position:sticky;top:0}
+.eg-body.wide .eg-right{flex:1 1 0;min-width:0;max-width:440px}
+.eg-body.wide .eg-right .presets{margin-top:0;grid-template-columns:repeat(auto-fill,minmax(4.75rem,1fr))}
+.eg-body.wide .eg-right .manual{margin-top:10px}
 .eg-body .presets{gap:5px;margin-top:10px}
 .eg-body .preset{background:transparent;border-color:var(--line);padding:7px 2px 6px;color:var(--ink-2);font-size:11px}
 .eg-body .preset svg{color:var(--ink-3);height:20px}
@@ -167,6 +174,39 @@ async function presetStore() {
   return store;
 }
 
+// Auto fit to the panel: graph on the left and the controls on the right when the panel is wide,
+// one column when it's narrow. The graph's height follows its width so the curve never looks flat
+// in a wide panel or squashed in a narrow one.
+function fitLayout(shadow, root) {
+  const main = shadow.querySelector("main");
+  const top = shadow.querySelector(".top-row");
+  if (!main || !top || shadow.querySelector(".eg-cols")) return;
+  const cols = document.createElement("div"); cols.className = "eg-cols";
+  const left = document.createElement("div"); left.className = "eg-left";
+  const right = document.createElement("div"); right.className = "eg-right";
+  const pick = (sel) => shadow.querySelector(sel);
+  [pick("#kft"), pick("main > .gwrap")].forEach((el) => el && left.appendChild(el));
+  [pick("#presets"), pick("#myEase"), pick("main > .manual"), pick("main > .ph-row"), pick("main > .under"), pick("main > details.more")]
+    .forEach((el) => el && right.appendChild(el));
+  cols.appendChild(left); cols.appendChild(right);
+  top.after(cols);
+  let lastW = 0;
+  const fit = () => {
+    const w = root.clientWidth; if (!w || w === lastW) return;
+    lastW = w;
+    const rootPx = parseFloat(getComputedStyle(document.documentElement).fontSize) || 16;
+    const wide = w / rootPx >= 34; // about 545 px at Medium
+    root.classList.toggle("wide", wide);
+    const gw = wide ? left.clientWidth : w;
+    const h = Math.round(Math.min(Math.max(gw * 0.5, 9 * rootPx), 16 * rootPx));
+    root.style.setProperty("--gh", h + "px");
+    requestAnimationFrame(() => window.dispatchEvent(new Event("resize")));
+  };
+  fit();
+  if (window.ResizeObserver) new ResizeObserver(fit).observe(root);
+  window.addEventListener("fs-size", () => { lastW = 0; setTimeout(fit, 30); }); // Small/Medium/Large changed
+}
+
 function run(shadow, root, store, getClient) {
   const timers = new Set(), frames = new Set();
   let alive = true;
@@ -231,6 +271,7 @@ export default function EaseGraph({ client }) {
     (async () => {
       if (window.__adobe_cep__ && !window.__DEMO_AEP) await loadHost().catch((e) => setError(e.message));
       if (cancelled) return;
+      fitLayout(shadow, root);
       const store = await presetStore();
       if (cancelled) return;
       try { stop = run(shadow, root, store, () => clientRef.current); } catch (e) { setError("Ease Graph couldn't start: " + e.message); }
