@@ -49,19 +49,59 @@ const LOOK = `
 .eg-body .switch input:checked + .track::after{background:var(--mark-ink)}
 .eg-body .gwrap{background:var(--sunk);border-radius:10px;box-shadow:inset 0 0 0 1px var(--line)}
 .eg-body .gwrap canvas{height:var(--gh,200px)}
-/* auto fit: a wide panel puts the graph on the left and the controls on the right */
-.eg-body .eg-cols{display:block}
-.eg-body.wide .eg-cols{display:flex;gap:16px;align-items:flex-start}
-.eg-body.wide .eg-left{flex:1.35 1 0;min-width:0;position:sticky;top:0}
-.eg-body.wide .eg-right{flex:1 1 0;min-width:0;max-width:440px}
-.eg-body.wide .eg-right .presets{margin-top:0;grid-template-columns:repeat(auto-fill,minmax(4.75rem,1fr))}
-.eg-body.wide .eg-right .manual{margin-top:10px}
 .eg-body .presets{gap:5px;margin-top:10px}
 .eg-body .preset{background:transparent;border-color:var(--line);padding:7px 2px 6px;color:var(--ink-2);font-size:11px}
 .eg-body .preset svg{color:var(--ink-3);height:20px}
 .eg-body .preset:hover{background:var(--raise);color:var(--ink)}
 .eg-body .preset[aria-pressed="true"],.eg-body .preset.smart[aria-pressed="true"]{background:var(--mark-soft);border-color:var(--mark);color:var(--ink)}
 .eg-body .preset[aria-pressed="true"] svg{color:var(--mark)}
+/* ---- OpenCurve-style layout: toolbar, graph + presets, timeline with ticks, Go bar ---- */
+.eg-body .bar{display:none}
+.eg-body .tb{display:flex;align-items:center;gap:4px;margin:0 0 8px}
+.eg-body .tb-gap{flex:1}
+.eg-body .tbi{width:30px;height:28px;padding:0;display:inline-grid;place-items:center;border-radius:7px;background:var(--raise);border:1px solid var(--line);color:var(--ink-2)}
+.eg-body .tbi:hover{background:var(--raise-2);color:var(--ink)}
+.eg-body .tbi svg{width:15px;height:15px;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
+.eg-body .tbi.sm{width:22px;height:20px;border-radius:5px;background:transparent;border-color:transparent}
+.eg-body .tbi.sm svg{width:12px;height:12px}
+.eg-body .tbi.sm:hover{background:var(--raise-2)}
+.eg-body .tb .switch{margin-left:6px}
+.eg-body .eg-top{display:flex;flex-direction:column;gap:8px}
+.eg-body.wide .eg-top{flex-direction:row;align-items:stretch}
+.eg-body.wide .eg-top .gwrap{flex:1.25 1 0;min-width:0}
+.eg-body.wide .eg-top .presets{flex:1 1 0;min-width:0;margin:0;max-height:var(--gh,200px);overflow-y:auto;align-content:start;grid-template-columns:repeat(auto-fill,minmax(5.2rem,1fr))}
+.eg-body .presets{margin-top:0}
+.eg-body .presets.as-list{grid-template-columns:repeat(auto-fill,minmax(8.5rem,1fr))!important}
+.eg-body .presets.as-list .preset{flex-direction:row;justify-content:flex-start;gap:8px;padding:5px 8px;text-align:left}
+.eg-body .presets.as-list .preset svg{width:26px;height:18px;flex:none}
+.eg-body .presets.as-list .mine-title{margin-top:4px}
+.eg-body .detected.found{display:none}
+.eg-body .detected{margin:10px 0 0}
+.eg-body .kft{margin:12px 0 0}
+.eg-body .tl{display:flex;background:var(--sunk);border-radius:10px;box-shadow:inset 0 0 0 1px var(--line);overflow:hidden}
+.eg-body .tl .kft-scroll{flex:1.3 1 0;min-width:0;background:none;box-shadow:none;border-radius:0;padding:0 10px}
+.eg-body .tl-names{flex:1 1 0;min-width:0;max-width:15rem;border-left:1px solid var(--line)}
+.eg-body .kft-row,.eg-body .tl-name{height:34px;padding:0;margin:0}
+.eg-body .kft-row + .kft-row{margin-top:0}
+.eg-body .kft-row:nth-child(even),.eg-body .tl-name:nth-child(even){background:rgba(255,255,255,.02)}
+.eg-body .kft-row.on{background:rgba(244,210,60,.045)}
+.eg-body .kft-track{height:34px}
+.eg-body .kft-seg{top:3px;height:28px}
+.eg-body .kft-key{top:12.5px}
+.eg-body .tl-name{display:flex;align-items:center;gap:2px;padding:0 4px 0 8px;font-size:12px;color:var(--ink-3)}
+.eg-body .tl-name label{flex:1;min-width:0;display:flex;align-items:center;gap:7px;cursor:pointer;height:100%}
+.eg-body .tl-name span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.eg-body .tl-name i{font-style:normal;opacity:.6}
+.eg-body .tl-name input{width:14px;height:14px;margin:0;flex:none;accent-color:var(--mark)}
+.eg-body .tl-name.on{color:var(--ink)}
+.eg-body .gobar{display:flex;align-items:center;gap:6px;margin-top:10px}
+.eg-body .ready{flex:1;min-width:0;font-size:11.5px;color:var(--ink-3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.eg-body .gobar .tbi{height:34px;width:34px}
+.eg-body .go{display:inline-flex;align-items:center;justify-content:center;gap:6px;height:34px;min-width:7.5rem;padding:0 18px;border-radius:9px;background:var(--mark);border:1px solid var(--mark);color:var(--mark-ink);font-weight:700;font-size:13px}
+.eg-body .go:hover{background:var(--mark-hover);border-color:var(--mark-hover)}
+.eg-body .go svg{width:14px;height:14px;fill:currentColor}
+.eg-body .go:disabled{opacity:.4}
+.eg-body #status{margin-top:6px;min-height:1.2em}
 .eg-body .mine-title{grid-column:1/-1;margin:6px 0 -1px;font-size:11px;color:var(--ink-3);font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .eg-body .mine-title i{font-style:normal;font-weight:400}
 .eg-body .preset.custom{border-style:solid}
@@ -178,27 +218,17 @@ async function presetStore() {
 // one column when it's narrow. The graph's height follows its width so the curve never looks flat
 // in a wide panel or squashed in a narrow one.
 function fitLayout(shadow, root) {
-  const main = shadow.querySelector("main");
-  const top = shadow.querySelector(".top-row");
-  if (!main || !top || shadow.querySelector(".eg-cols")) return;
-  const cols = document.createElement("div"); cols.className = "eg-cols";
-  const left = document.createElement("div"); left.className = "eg-left";
-  const right = document.createElement("div"); right.className = "eg-right";
-  const pick = (sel) => shadow.querySelector(sel);
-  [pick("#kft"), pick("main > .gwrap")].forEach((el) => el && left.appendChild(el));
-  [pick("#presets"), pick("#myEase"), pick("main > .manual"), pick("main > .ph-row"), pick("main > .under"), pick("main > details.more")]
-    .forEach((el) => el && right.appendChild(el));
-  cols.appendChild(left); cols.appendChild(right);
-  top.after(cols);
+  const top = shadow.querySelector(".eg-top");
+  if (!top) return;
   let lastW = 0;
   const fit = () => {
     const w = root.clientWidth; if (!w || w === lastW) return;
     lastW = w;
     const rootPx = parseFloat(getComputedStyle(document.documentElement).fontSize) || 16;
-    const wide = w / rootPx >= 34; // about 545 px at Medium
+    const wide = w / rootPx >= 30; // about 480 px at Medium: graph and presets side by side
     root.classList.toggle("wide", wide);
-    const gw = wide ? left.clientWidth : w;
-    const h = Math.round(Math.min(Math.max(gw * 0.5, 9 * rootPx), 16 * rootPx));
+    const gw = wide ? w * 0.56 : w;
+    const h = Math.round(Math.min(Math.max(gw * (wide ? 0.62 : 0.5), 9 * rootPx), 17 * rootPx));
     root.style.setProperty("--gh", h + "px");
     requestAnimationFrame(() => window.dispatchEvent(new Event("resize")));
   };

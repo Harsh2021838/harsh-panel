@@ -1,31 +1,48 @@
-<header class="bar">
-  <h1 class="brand" translate="no"><span class="logo" aria-hidden="true"></span>EaseGraph</h1>
-  <button id="btnRefresh" class="icon" aria-label="Check selected clip again" title="Check selected clip again">⟳</button>
-</header>
-
 <main>
-  <div class="top-row">
-    <p id="detected" class="detected" aria-live="polite"></p>
+  <div class="tb" role="toolbar" aria-label="Ease tools">
+    <button id="btnView" class="tbi" title="Show presets as a list or a grid" aria-label="List or grid"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 4h10M3 8h10M3 12h10"/></svg></button>
+    <button id="btnAddPreset" class="tbi" title="Save the curve as your own ease" aria-label="Save curve"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3v10M3 8h10"/></svg></button>
+    <span class="tb-gap"></span>
+    <button id="btnFlip" class="tbi" title="Flip the curve, start becomes end (F)" aria-label="Flip"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2 13C7 13 6 3 14 3"/><path d="M8 1v14" stroke-dasharray="2 2"/></svg></button>
+    <button id="btnInvert" class="tbi" title="Invert: ease in becomes ease out (I)" aria-label="Invert"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2 14C2 6 6 2 14 2"/><path d="M2 2l12 12" stroke-dasharray="2 2"/></svg></button>
+    <button id="btnRefresh" class="tbi" title="Read the selected clip again" aria-label="Read the selected clip again"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M13 8a5 5 0 1 1-1.5-3.6"/><path d="M13 2v3h-3"/></svg></button>
     <label class="switch" title="Ease new keyframes automatically with Smart">
       <input type="checkbox" id="autoEase" role="switch"><span class="track" aria-hidden="true"></span>Auto
     </label>
   </div>
 
+  <div class="eg-top">
+    <div class="gwrap"><canvas id="cvValue" aria-label="Ease graph. Drag the yellow handles to shape the ease."></canvas></div>
+    <div class="presets" id="presets"></div>
+  </div>
+  <div class="my-ease" id="myEase" hidden></div>
+
+  <p id="detected" class="detected" aria-live="polite"></p>
+
   <section class="kft" id="kft" aria-label="Keyframes on the selected clip">
     <div class="kft-head">
       <p id="kftInfo" class="kft-info"></p>
       <div class="kft-tools">
-        <button id="kftAll" class="link" title="Select every keyframe pair">Select all</button>
+        <button id="kftAll" class="link" title="Pick every keyframe pair">Pick all</button>
         <button id="kftOut" class="icon" title="Zoom out" aria-label="Zoom out">&minus;</button>
         <button id="kftIn" class="icon" title="Zoom in" aria-label="Zoom in">+</button>
       </div>
     </div>
-    <div class="kft-scroll" id="kftScroll"><div class="kft-inner" id="kftInner"></div></div>
-    <div class="kft-legend"><span class="lg smooth"></span>Smooth <span class="lg linear"></span>Linear (not eased) <span class="lg sel"></span>Selected</div>
+    <div class="tl">
+      <div class="kft-scroll" id="kftScroll"><div class="kft-inner" id="kftInner"></div></div>
+      <div class="tl-names" id="tlNames"></div>
+    </div>
   </section>
-  <div class="gwrap"><canvas id="cvValue" aria-label="Ease graph. Drag the orange handles to shape the ease."></canvas></div>
-  <div class="presets" id="presets"></div>
-  <div class="my-ease" id="myEase" hidden></div>
+
+  <div class="gobar">
+    <span id="ready" class="ready"></span>
+    <button id="btnUndo" class="tbi" title="Undo the last change (U)" aria-label="Undo"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M5 3L2 6l3 3"/><path d="M2 6h7a4 4 0 0 1 0 8H6"/></svg></button>
+    <button id="btnGo" class="go" title="Write the ease onto the keyframes (Enter)"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M9 1L3 9h4l-1 6 6-8H8z"/></svg>Go</button>
+  </div>
+  <p id="status" class="status" role="status" aria-live="polite"></p>
+
+  <details class="more" id="more">
+    <summary>More options</summary>
 
   <div class="manual">
     <label>Ease out<span class="num-in"><input id="outInf" name="outInf" type="number" inputmode="decimal" min="1" max="100" step="1" autocomplete="off"><i>%</i></span></label>
@@ -37,13 +54,6 @@
     <button id="btnStartPH" title="Slide the whole animation so it starts at the playhead">Start at Playhead</button>
   </div>
 
-  <div class="under">
-    <p id="status" class="status" role="status" aria-live="polite"></p>
-    <button id="btnUndo" class="link">Undo</button>
-  </div>
-
-  <details class="more" id="more">
-    <summary>More options</summary>
 
     <h3>Speed graph</h3>
     <div class="gwrap"><canvas id="cvSpeed" aria-label="Speed graph. Drag handles sideways for influence, up or down for speed."></canvas></div>
@@ -52,13 +62,6 @@
       <label>Out speed<input id="outSpd" name="outSpd" type="number" inputmode="decimal" step="0.05" autocomplete="off"></label>
       <label>In speed<input id="inSpd" name="inSpd" type="number" inputmode="decimal" step="0.05" autocomplete="off"></label>
       <label class="span2">Bezier values<input id="bezText" name="bez" spellcheck="false" autocomplete="off" placeholder="0.33, 0, 0.67, 1…"></label>
-      <label>Apply to
-        <select id="scope" name="scope">
-          <option value="all">All keyframes</option>
-          <option value="playhead">At playhead</option>
-          <option value="checked">Ticked keys</option>
-        </select>
-      </label>
       <label>Key spacing
         <select id="step" name="step"><option value="1">Every frame</option><option value="2">Every 2 frames</option></select>
       </label>

@@ -81,7 +81,7 @@
     var A = getAnchors(prm), segs = [];
     for (var i = 0; i < A.length - 1; i++) segs.push({ a: A[i], b: A[i + 1] });
     // Pairs picked in the keyframe strip win over the "Apply to" setting.
-    if (selCount() && scope !== 'every') return segs.filter(function (s) { return state.selSegs[pkey(prm) + '|' + s.a.t]; });
+    if (scope === 'picked' || (selCount() && scope !== 'every' && scope !== 'playhead' && scope !== 'all')) return segs.filter(function (s) { return state.selSegs[pkey(prm) + '|' + s.a.t]; });
     if (scope === 'playhead') {
       var kt = keyTimeAtPlayhead(prm);
       segs = segs.filter(function (s) { return kt >= s.a.t && kt < s.b.t; });
@@ -93,6 +93,34 @@
       segs = segs.filter(function (s) { return s.a.t >= lo && s.b.t <= hi; });
     }
     return segs;
+  }
+
+  // What Go eases: the pairs picked on the timeline; otherwise, for each ticked property, the pair
+  // under the playhead, or all its pairs when the playhead isn't between two of its keyframes.
+  function goSegs(prm) {
+    if (selCount()) return segmentsFor(prm, 'picked');
+    if (!state.checkedParams[pkey(prm)]) return [];
+    var at = segmentsFor(prm, 'playhead');
+    return at.length ? at : segmentsFor(prm, 'all');
+  }
+  function goPlan() {
+    var props = 0, pairs = 0, atPh = 0;
+    targets().forEach(function (prm) {
+      var g = goSegs(prm); if (!g.length) return;
+      props++; pairs += g.length;
+      if (!selCount() && segmentsFor(prm, 'playhead').length) atPh++;
+    });
+    return { props: props, pairs: pairs, atPh: atPh };
+  }
+  function renderReady() {
+    var el = $('#ready'); if (!el) return;
+    var g = goPlan(), go = $('#btnGo');
+    go.disabled = !g.pairs;
+    if (!targets().length) { el.textContent = 'No keyframes on the selected clip'; return; }
+    if (!g.pairs) { el.textContent = selCount() ? 'Nothing picked' : 'Tick a property below'; return; }
+    el.textContent = selCount()
+      ? g.pairs + ' picked pair' + (g.pairs > 1 ? 's' : '') + ' ready'
+      : g.props + ' propert' + (g.props > 1 ? 'ies' : 'y') + ' ready \u00b7 ' + (g.atPh === g.props ? 'pair at playhead' : g.atPh ? 'playhead pair or all' : 'all ' + g.pairs + ' pair' + (g.pairs > 1 ? 's' : ''));
   }
 
   function targets() {
@@ -309,10 +337,10 @@
     if (state.busy) { state.pendingApply = true; return; }
     if (!targets().length) return setStatus('Select a clip that has 2 keyframes first.', 'err');
     run('Applying', function () {
-      var scope = $('#scope').value, jobs = [], undo = [], count = 0, curve = clone(state.curve), nativeKeys = [];
+      var jobs = [], undo = [], count = 0, curve = clone(state.curve), nativeKeys = [];
       var smart = state.mode === 'smart';
       targets().forEach(function (prm) {
-        var segs = segmentsFor(prm, scope);
+        var segs = goSegs(prm);
         if (!segs.length) return;
         var r = ensureReg(prm), sm = smart ? smartMap(prm) : null;
         segs.forEach(function (s) {
@@ -335,9 +363,7 @@
         regSet(prm, r);
       });
       if (!jobs.length) throw new Error(!targets().length ? 'Select a clip that has 2 keyframes first.' :
-        scope === 'checked' ? 'Tick at least 2 keys in the keyframe table.' :
-        scope === 'playhead' ? 'Move the playhead between two keyframes, then apply again.' :
-        'The chosen properties need at least 2 keyframes.');
+        'Tick a property on the timeline, or pick a keyframe pair.');
       pushUndo('apply', undo);
       return H.call('writeRanges', { jobs: jobs }).then(function () {
         if (nativeKeys.length) return verifyNative(nativeKeys, count);
@@ -350,10 +376,10 @@
 
   function unbake() {
     run('Removing ease', function () {
-      var scope = $('#scope').value, jobs = [], undo = [];
+      var jobs = [], undo = [];
       targets().forEach(function (prm) {
         var r = ensureReg(prm);
-        segmentsFor(prm, scope).forEach(function (s) {
+        goSegs(prm).forEach(function (s) {
           undo.push(snapshot(prm, s.a.t, s.b.t));
           jobs.push(clearJob(prm, s.a, s.b));
           r.curves[s.a.t] = null; // removed on purpose: Auto leaves it alone
@@ -363,6 +389,30 @@
       if (!jobs.length) throw new Error('No eased keyframe pairs to remove here.');
       pushUndo('unbake', undo);
       return H.call('writeRanges', { jobs: jobs }).then(function () { return 'Ease removed from ' + jobs.length + ' keyframe pair' + (jobs.length > 1 ? 's' : '') + '.'; });
+    });
+  }
+
+  // Undo one property's last change, leaving the others as they are.
+  function propUndoable(prm) {
+    var k = pkey(prm);
+    return state.undo.some(function (u) { return u.jobs.some(function (j) { return j.nodeId + '|' + j.c + '|' + j.p === k; }); });
+  }
+  function undoProp(k) {
+    var i, u, mine = null;
+    for (i = state.undo.length - 1; i >= 0 && !mine; i--) {
+      u = state.undo[i];
+      var js = u.jobs.filter(function (j) { return j.nodeId + '|' + j.c + '|' + j.p === k; });
+      if (js.length) { mine = { u: u, jobs: js, i: i }; }
+    }
+    if (!mine) return;
+    run('Undoing', function () {
+      // this property's own record goes back to how it was; the others keep theirs
+      var prm = state.params.filter(function (p) { return pkey(p) === k; })[0];
+      if (prm) { var id = regId(prm); if (mine.u.reg[id]) reg[id] = mine.u.reg[id]; else delete reg[id]; save(REG_KEY, reg); }
+      mine.u.jobs = mine.u.jobs.filter(function (j) { return mine.jobs.indexOf(j) < 0; });
+      if (!mine.u.jobs.length) state.undo.splice(mine.i, 1);
+      $('#btnUndo').disabled = !state.undo.length;
+      return H.call('writeRanges', { jobs: mine.jobs }).then(function () { return 'Undone on ' + (prm ? prm.name : 'that property') + ' only.'; });
     });
   }
 
@@ -549,12 +599,9 @@
       sel.innerHTML = '';
       return;
     }
-    el.className = 'detected';
+    el.className = 'detected found';
+    el.textContent = '';
     var multiClip = state.data.clips.length > 1;
-    el.innerHTML = 'Found ' + found.map(function (p) {
-      return '<b>' + esc(p.name) + '</b>' + (multiClip ? ' on ' + esc(p.clipName) : '') +
-        ' (' + getAnchors(p).length + ' keyframes)';
-    }).join(', ');
     sel.innerHTML = state.params.map(function (p) {
       return '<option value="' + esc(pkey(p)) + '"' + (pkey(p) === state.focusKey ? ' selected' : '') + '>' +
         esc(p.name) + (multiClip ? ' (' + esc(p.clipName) + ')' : '') + '</option>';
@@ -706,7 +753,7 @@
       picked = null; setMode('curve'); state.curve = clone(builtIn[Number(bi)].curve);
     }
     curveChanged();
-    applyCurve();
+    setStatus(curveName(state.curve) + ' chosen. Press Go (or Enter) to write it.');
   });
   $('#presets').addEventListener('contextmenu', function (e) {
     var b = e.target.closest('.preset.custom'); if (!b) return;
@@ -790,7 +837,6 @@
     setMode('curve');
     state.curve = { type: 'bezier', p: [E.clamp(nums[0], 0, 1), nums[1], E.clamp(nums[2], 0, 1), nums[3]] };
     curveChanged();
-    applyCurve();
   });
   function realSpeedHint() {
     var prm = focusParam(), el = $('#realSpeed');
@@ -937,7 +983,7 @@
   }
   cvV.addEventListener('pointermove', onMove); cvS.addEventListener('pointermove', onMove);
   ['pointerup', 'pointercancel'].forEach(function (ev) {
-    var end = function () { if (drag) { drag = null; applyCurve(); } };
+    var end = function () { if (drag) { drag = null; setStatus('Curve shaped. Press Go (or Enter) to write it.'); } };
     cvV.addEventListener(ev, end); cvS.addEventListener(ev, end);
   });
 
@@ -998,7 +1044,7 @@
   function renderStrip() {
     var list = targets(), box = $('#kftInner'), info = $('#kftInfo');
     $('#kft').hidden = !list.length;
-    if (!list.length) { box.innerHTML = ''; return; }
+    if (!list.length) { box.innerHTML = ''; $('#tlNames').innerHTML = ''; renderReady(); return; }
     // drop picks whose keyframes are gone
     var valid = {};
     list.forEach(function (prm) { segmentsFor(prm, 'every').forEach(function (s) { valid[segKey(prm, s.a)] = 1; }); });
@@ -1016,7 +1062,7 @@
     var multi = state.data.clips.length > 1, html = '', pairs = 0, smoothN = 0, picked = selCount();
     list.forEach(function (prm) {
       var A = getAnchors(prm), r = regGet(prm) || { curves: {} };
-      html += '<div class="kft-row"><div class="kft-name">' + esc(prm.name) + (multi ? ' <i>' + esc(prm.clipName) + '</i>' : '') + '</div><div class="kft-track" style="width:' + W + 'px">';
+      html += '<div class="kft-row' + (state.checkedParams[pkey(prm)] ? ' on' : '') + '"><div class="kft-track" style="width:' + W + 'px">';
       for (var i = 0; i < A.length - 1; i++) {
         var a = A[i], b = A[i + 1], k = segKey(prm, a), x0 = Number(X(seqT(prm, a.t))), x1 = Number(X(seqT(prm, b.t)));
         var p = progress(state.samples[k], a, b), eased = isEased(p);
@@ -1038,6 +1084,15 @@
     if (ph >= t0 && ph <= t1) html += '<span class="kft-ph" style="left:' + X(ph) + 'px"></span>';
     box.style.width = W + 'px';
     box.innerHTML = html;
+    $('#tlNames').innerHTML = list.map(function (prm) {
+      var k = pkey(prm), on = !!state.checkedParams[k];
+      return '<div class="tl-name' + (on ? ' on' : '') + '" data-k="' + esc(k) + '">' +
+        '<label title="Tick to ease this property with Go"><input type="checkbox" data-tick' + (on ? ' checked' : '') + '>' +
+        '<span>' + esc(prm.name) + (multi ? ' <i>' + esc(prm.clipName) + '</i>' : '') + '</span></label>' +
+        (propUndoable(prm) ? '<button class="tbi sm" data-undo title="Undo the last change on ' + esc(prm.name) + ' only" aria-label="Undo ' + esc(prm.name) + '"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M5 3L2 6l3 3"/><path d="M2 6h7a4 4 0 0 1 0 8H6"/></svg></button>' : '') +
+        '</div>';
+    }).join('');
+    renderReady();
     var linear = pairs - smoothN;
     info.innerHTML = '<b>' + pairs + ' keyframe pair' + (pairs === 1 ? '' : 's') + '</b>' +
       (linear ? ', <span class="warn">' + linear + ' not eased</span>' : ', all smooth') +
@@ -1050,13 +1105,23 @@
     else if (state.selSegs[k] && selCount() === 1) delete state.selSegs[k];
     else { state.selSegs = {}; state.selSegs[k] = true; }
     renderStrip();
-    setStatus(selCount() ? 'Picked ' + selCount() + ' pair' + (selCount() > 1 ? 's' : '') + '. Choose an ease below to apply it to just these.' : 'Nothing picked: eases apply to every pair.');
+    setStatus(selCount() ? 'Picked ' + selCount() + ' pair' + (selCount() > 1 ? 's' : '') + '. Go eases just these.' : 'Nothing picked: Go eases the ticked properties.');
   });
   $('#kftAll').addEventListener('click', function () {
     var all = {}, n = 0;
     targets().forEach(function (prm) { segmentsFor(prm, 'every').forEach(function (s) { all[segKey(prm, s.a)] = true; n++; }); });
     state.selSegs = selCount() === n ? {} : all;
     renderStrip();
+  });
+  $('#tlNames').addEventListener('change', function (e) {
+    if (!e.target.hasAttribute('data-tick')) return;
+    var k = e.target.closest('.tl-name').getAttribute('data-k');
+    if (e.target.checked) state.checkedParams[k] = true; else delete state.checkedParams[k];
+    renderStrip();
+  });
+  $('#tlNames').addEventListener('click', function (e) {
+    var b = e.target.closest('[data-undo]'); if (!b) return;
+    undoProp(b.closest('.tl-name').getAttribute('data-k'));
   });
   function zoomBy(f) { state.zoom = Math.max(1, Math.min(24, state.zoom * f)); renderStrip(); }
   $('#kftIn').addEventListener('click', function () { zoomBy(1.6); });
@@ -1079,6 +1144,22 @@
   $('#btnAddKey').addEventListener('click', addKeyAtPlayhead);
   $('#btnDelKey').addEventListener('click', deleteChecked);
   $('#btnUndo').disabled = true;
+  $('#btnGo').addEventListener('click', applyCurve);
+  $('#btnAddPreset').addEventListener('click', function () { picked = null; openForm('new'); renderPresets(); });
+  var listView = load('easegraph.listView', false);
+  function setView() { $('#presets').classList.toggle('as-list', !!listView); }
+  setView();
+  $('#btnView').addEventListener('click', function () { listView = !listView; save('easegraph.listView', listView); setView(); });
+  function reshape(fn, msg) {
+    if (state.curve.type !== 'bezier') return;
+    var p = state.curve.p;
+    state.curve = { type: 'bezier', p: fn(p) }; setMode('curve'); picked = null;
+    curveChanged(); setStatus(msg + ' Press Go (or Enter) to write it.');
+  }
+  function flip() { reshape(function (p) { return [1 - p[2], 1 - p[3], 1 - p[0], 1 - p[1]]; }, 'Curve flipped.'); }
+  function invert() { reshape(function (p) { return [E.clamp(p[1], 0, 1), p[0], E.clamp(p[3], 0, 1), p[2]]; }, 'Curve inverted.'); }
+  $('#btnFlip').addEventListener('click', flip);
+  $('#btnInvert').addEventListener('click', invert);
 
   // Detect clip selection / new keyframes automatically (checks every 1.5 s)
   var lastSig = null;
@@ -1092,16 +1173,27 @@
 
   // Reload automatically whenever you click back into the panel
   window.addEventListener('focus', function () { if (!state.busy) loadSelection(true); });
+  // Shortcuts while the panel has focus: Enter Go, U undo, F flip, I invert, 1-9 presets
   document.addEventListener('keydown', function (e) {
-    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && e.target.tagName !== 'INPUT') { e.preventDefault(); applyCurve(); }
+    var tag = e.target.tagName;
+    if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA' || e.altKey) return;
+    if (e.key === 'Enter' && !(tag === 'BUTTON' && e.target.id !== 'btnGo')) { e.preventDefault(); applyCurve(); return; }
+    if (e.ctrlKey || e.metaKey) return;
+    var k = e.key.toLowerCase();
+    if (k === 'u') { e.preventDefault(); undoLast(); }
+    else if (k === 'f') { e.preventDefault(); flip(); }
+    else if (k === 'i') { e.preventDefault(); invert(); }
+    else if (/^[1-9]$/.test(k)) {
+      var tiles = [].slice.call(document.querySelectorAll('#presets .preset:not(.add)'));
+      var t = tiles[Number(k) - 1]; if (t) { e.preventDefault(); t.click(); }
+    }
   });
 
   curveChanged();
   loadSelection(true).then(function () {
     markSeen();
     H.call('selSignature').then(function (sig) { if (lastSig === null) lastSig = sig; }).catch(function () {});
-    if (!H.isPremiere) setStatus('Demo clip loaded. Tap a graph, or type a number and press Enter.');
-    else if (state.params.length) setStatus('Tap a graph, or type a number and press Enter.');
+    if (state.params.length || !H.isPremiere) setStatus('Pick an ease or drag the curve, then press Go.');
   });
 
   // test hooks
