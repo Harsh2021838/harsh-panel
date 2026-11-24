@@ -3,7 +3,7 @@ import { createRoot } from "react-dom/client";
 import { startSizing } from "./density.js";
 import SizeSwitch from "./tools/SizeSwitch.jsx";
 import { hostApp, hostName, hostBackground, onThemeChange, extensionPath, host } from "./host.js";
-import { Wrench, Image, Helix, Check, Proof, Back, Chevron, Gear, Caret, Plus, Wave, GapIcon, VaultIcon, EaseIcon } from "./icons.jsx";
+import { Wrench, Image, Helix, Check, Proof, Back, Chevron, Gear, Caret, Plus, Wave, GapIcon, VaultIcon, EaseIcon, PackIcon } from "./icons.jsx";
 import Settings from "./sections/Settings.jsx";
 import { findUpdate, installUpdate, updateMode, downloadUpdate } from "./updater.js";
 import { hostIdle } from "./host.js";
@@ -17,9 +17,10 @@ import EaseGraph from "./tools/ease-graph/EaseGraph.jsx";
 import GapQC from "./tools/gap-qc/GapQC.jsx";
 import AudioQC from "./tools/audio-qc/AudioQC.jsx";
 import CompVault from "./tools/comp-vault/CompVault.jsx";
+import Pack from "./tools/pack/Pack.jsx";
 import "./styles.css";
 
-const VERSION = "2.25.0";
+const VERSION = "2.26.0";
 
 // The four sections. Add a tool by putting it in a section's `tools` list
 // (or drop a plugin file into /plugins, see plugins/README.md).
@@ -28,6 +29,7 @@ const SECTIONS = [
     { id: "comp-vault", name: "Comp Vault", description: "Save comps, layers, logos and client colours once; add them to any project", icon: VaultIcon, hosts: ["AEFT", "PPRO"], Component: CompVault },
     { id: "sound-kit", name: "Sound Kit", description: "Each client's SFX and BGM, levelled and coloured, placed in one click", icon: () => <Wave size={18} />, hosts: ["PPRO"], fill: true, Component: SoundKit },
     { id: "ease-graph", name: "Ease Graph", description: "After Effects-style value and speed graphs for Premiere keyframes, with Smart ease", icon: () => <EaseIcon size={18} />, hosts: ["PPRO"], fill: true, Component: EaseGraph },
+    { id: "pack", name: "Pack", description: "Archive a project: collect its media, trim what isn\u2019t used, relink a copy", icon: PackIcon, hosts: ["PPRO"], Component: Pack },
   ] },
   { id: "assets", name: "Assets", icon: Image, screen: "assets", tools: [] },
   { id: "client-dna", name: "Client DNA", icon: Helix, screen: "dna", tools: [] },

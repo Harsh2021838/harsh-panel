@@ -95,3 +95,9 @@ export const VaultIcon = ({ size = 18 }) => (
 export const EaseIcon = ({ size = 22 }) => (
   <svg {...base(size)}><path d="M3 20c7 0 7-16 18-16" /><circle cx="3" cy="20" r="1.4" /><circle cx="21" cy="4" r="1.4" /><path d="M3 20h5M21 4h-5" /></svg>
 );
+export const PackIcon = ({ size = 18 }) => (
+  <svg {...base(size)}><path d="M4 8.5 12 4l8 4.5v7L12 20l-8-4.5z" /><path d="M4 8.5 12 13l8-4.5M12 13v7" /><path d="m8 6.3 8 4.5" /></svg>
+);
+export const Scissors = ({ size = 14 }) => (
+  <svg {...base(size)}><circle cx="6" cy="7" r="2.5" /><circle cx="6" cy="17" r="2.5" /><path d="M8.2 8.3 20 17M8.2 15.7 20 7" /></svg>
+);
